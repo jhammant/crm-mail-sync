@@ -1,0 +1,12 @@
+mailbox_addresses: [operator@example.com]
+internal_domains: [example.com]
+never_log: [investor@example.org]
+private_label: Private - no CRM
+review_keywords: [term sheet, investment, board, salary, confidential]
+# Paths are relative to this config file. Put your real config outside the repo.
+state_path: ../.local/state.json
+review_path: ../.local/review.jsonl
+gmail_token_path: ../.local/gmail-token.json
+hubspot_token_env: HUBSPOT_TOKEN
+hubspot_owner_id: null
+initial_since: '2026-10-01'

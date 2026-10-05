@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crm-mail-sync"
+version = "0.1.0"
+description = "Selective, rules-based email logging with a human review queue"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = ["PyYAML==6.0.3", "google-api-python-client==2.184.0", "google-auth-oauthlib==1.2.2"]
+
+[project.optional-dependencies]
+dev = ["pytest==9.0.2"]
+
+[project.scripts]
+crm-mail-sync = "crm_mail_sync.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--basetemp=.pytest_tmp"

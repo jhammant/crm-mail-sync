@@ -1,0 +1,327 @@
+{
+  "messages": [
+    {
+      "id": "intro",
+      "thread_id": "intro",
+      "timestamp": "2026-10-02T09:00:00Z",
+      "sender": {
+        "email": "investor@example.org",
+        "name": "Investor"
+      },
+      "to": [
+        {
+          "email": "operator@example.com",
+          "name": "Operator"
+        },
+        {
+          "email": "partner@example.org",
+          "name": "Partner"
+        }
+      ],
+      "subject": "intro",
+      "text": "Discuss the customer project."
+    },
+    {
+      "id": "investor-only",
+      "thread_id": "investor-only",
+      "timestamp": "2026-10-02T09:01:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "investor@example.org",
+          "name": "Investor"
+        }
+      ],
+      "subject": "investor-only",
+      "text": "Discuss the customer project."
+    },
+    {
+      "id": "internal-only",
+      "thread_id": "internal-only",
+      "timestamp": "2026-10-02T09:02:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "colleague@example.com",
+          "name": "Colleague"
+        }
+      ],
+      "subject": "internal-only",
+      "text": "Discuss the customer project."
+    },
+    {
+      "id": "private-message",
+      "thread_id": "private-message",
+      "timestamp": "2026-10-02T09:03:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "partner@example.org",
+          "name": "Partner"
+        }
+      ],
+      "subject": "private-message",
+      "text": "Discuss the customer project.",
+      "labels": [
+        "Private - no CRM"
+      ]
+    },
+    {
+      "id": "private-thread",
+      "thread_id": "private-thread",
+      "timestamp": "2026-10-02T09:04:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "partner@example.org",
+          "name": "Partner"
+        }
+      ],
+      "subject": "private-thread",
+      "text": "Discuss the customer project.",
+      "thread_labels": [
+        "Private - no CRM"
+      ]
+    },
+    {
+      "id": "calendar-subject",
+      "thread_id": "calendar-subject",
+      "timestamp": "2026-10-02T09:05:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "partner@example.org",
+          "name": "Partner"
+        }
+      ],
+      "subject": "Accepted: Project meeting",
+      "text": "Discuss the customer project."
+    },
+    {
+      "id": "calendar-part",
+      "thread_id": "calendar-part",
+      "timestamp": "2026-10-02T09:06:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "partner@example.org",
+          "name": "Partner"
+        }
+      ],
+      "subject": "calendar-part",
+      "text": "Discuss the customer project.",
+      "has_calendar": true
+    },
+    {
+      "id": "bulk",
+      "thread_id": "bulk",
+      "timestamp": "2026-10-02T09:07:00Z",
+      "sender": {
+        "email": "no-reply@example.org",
+        "name": "No-Reply"
+      },
+      "to": [
+        {
+          "email": "operator@example.com",
+          "name": "Operator"
+        }
+      ],
+      "subject": "bulk",
+      "text": "Discuss the customer project."
+    },
+    {
+      "id": "unknown-with-investor",
+      "thread_id": "unknown-with-investor",
+      "timestamp": "2026-10-02T09:08:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "unknown@example.org",
+          "name": "Unknown"
+        },
+        {
+          "email": "investor@example.org",
+          "name": "Investor"
+        }
+      ],
+      "subject": "unknown-with-investor",
+      "text": "Discuss the customer project."
+    },
+    {
+      "id": "keyword",
+      "thread_id": "keyword",
+      "timestamp": "2026-10-02T09:09:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "partner@example.org",
+          "name": "Partner"
+        }
+      ],
+      "subject": "Project term sheet",
+      "text": "Discuss the customer project."
+    },
+    {
+      "id": "already-logged",
+      "thread_id": "already-logged",
+      "timestamp": "2026-10-02T09:10:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "partner@example.org",
+          "name": "Partner"
+        }
+      ],
+      "subject": "already-logged",
+      "text": "Discuss the customer project."
+    },
+    {
+      "id": "unknown",
+      "thread_id": "unknown",
+      "timestamp": "2026-10-02T09:11:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "unknown@example.org",
+          "name": "Unknown"
+        }
+      ],
+      "subject": "unknown",
+      "text": "Discuss the customer project."
+    },
+    {
+      "id": "incomplete",
+      "thread_id": "incomplete",
+      "timestamp": "2026-10-02T09:12:00Z",
+      "sender": {
+        "email": "operator@example.com",
+        "name": "Operator"
+      },
+      "to": [
+        {
+          "email": "partner@example.org",
+          "name": "Partner"
+        }
+      ],
+      "subject": "incomplete",
+      "text": "Discuss the customer project.",
+      "incomplete": true
+    }
+  ],
+  "crm": {
+    "contacts": [
+      {
+        "id": "partner",
+        "email": "partner@example.org",
+        "company_id": "company-partner"
+      },
+      {
+        "id": "investor",
+        "email": "investor@example.org",
+        "company_id": "company-investor"
+      }
+    ],
+    "companies": [
+      "company-partner",
+      "company-investor"
+    ],
+    "deals": {
+      "partner": [
+        {
+          "id": "d1",
+          "stage": "open",
+          "modified": "2026-10-01T10:00:00Z"
+        },
+        {
+          "id": "d2",
+          "stage": "open",
+          "modified": "2026-10-02T10:00:00Z"
+        },
+        {
+          "id": "d3",
+          "stage": "open",
+          "modified": "2026-10-03T10:00:00Z"
+        },
+        {
+          "id": "d4",
+          "stage": "open",
+          "modified": "2026-10-04T10:00:00Z"
+        },
+        {
+          "id": "d5",
+          "stage": "open",
+          "modified": "2026-10-05T10:00:00Z"
+        },
+        {
+          "id": "d6",
+          "stage": "open",
+          "modified": "2026-10-06T10:00:00Z"
+        },
+        {
+          "id": "d7",
+          "stage": "open",
+          "modified": "2026-10-07T10:00:00Z"
+        },
+        {
+          "id": "won",
+          "stage": "closedwon",
+          "modified": "2026-10-09T10:00:00Z"
+        },
+        {
+          "id": "lost",
+          "stage": "closedlost",
+          "modified": "2026-10-09T10:00:00Z"
+        },
+        {
+          "id": "custom-closed",
+          "stage": "custom",
+          "closed": true,
+          "modified": "2026-10-09T10:00:00Z"
+        }
+      ],
+      "investor": [
+        {
+          "id": "investor-deal",
+          "stage": "open",
+          "modified": "2026-10-09T10:00:00Z"
+        }
+      ]
+    },
+    "emails": [
+      {
+        "subject": "already-logged",
+        "timestamp": "2026-10-02T09:12:00Z"
+      }
+    ]
+  }
+}
