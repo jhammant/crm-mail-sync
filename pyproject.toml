@@ -6,12 +6,13 @@ build-backend = "setuptools.build_meta"
 name = "crm-mail-sync"
 version = "0.1.0"
 description = "Selective, rules-based email logging with a human review queue"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 dependencies = ["PyYAML==6.0.3", "google-api-python-client==2.184.0", "google-auth-oauthlib==1.2.2"]
 
 [project.optional-dependencies]
-dev = ["pytest==9.0.2"]
+dev = ["pytest==9.0.2", "setuptools==80.9.0"]
 
 [project.scripts]
 crm-mail-sync = "crm_mail_sync.cli:main"
