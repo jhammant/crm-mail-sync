@@ -59,3 +59,9 @@ def test_approval_never_overrides_hard_rules(config, source, crm):
 def test_keyword_boundaries(config, source, crm):
     message = replace(source.get_message('intro'), subject='Onboarding keyboard', text='A dashboard')
     assert classify(message, config, crm.contacts).action == 'log'
+
+
+@pytest.mark.parametrize('html', ['<p>term&nbsp;sheet</p>', '<p>term</p><p>sheet</p>', '<p>sa<b>la</b>ry</p>'])
+def test_html_keywords_cannot_hide_in_markup(config, source, crm, html):
+    message = replace(source.get_message('intro'), text='', html=html)
+    assert classify(message, config, crm.contacts).action == 'review'

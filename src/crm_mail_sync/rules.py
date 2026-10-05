@@ -1,5 +1,6 @@
 """Pure decisions: hard exclusions, human review, then eligible contacts."""
 import re
+from html.parser import HTMLParser
 from collections.abc import Mapping, Sequence
 
 from .config import Config, EMAIL
@@ -39,6 +40,28 @@ def hard_skip(message: Message, config: Config) -> str | None:
     return None
 
 
+def visible_html(value: str) -> str:
+    """Preserve inline words and separate block text for keyword matching."""
+    class Text(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=True)
+            self.parts: list[str] = []
+
+        def handle_data(self, data: str) -> None:
+            self.parts.append(data)
+
+        def handle_starttag(self, tag: str, attrs: list) -> None:
+            if tag in {'br', 'p', 'div', 'li', 'tr', 'h1', 'h2', 'h3'}:
+                self.parts.append(' ')
+
+        def handle_endtag(self, tag: str) -> None:
+            self.handle_starttag(tag, [])
+
+    parser = Text()
+    parser.feed(value)
+    return ''.join(parser.parts)
+
+
 def classify(message: Message, config: Config, contacts: Mapping[str, Contact | None], *, approved: bool = False) -> Decision:
     reason = hard_skip(message, config)
     if reason:
@@ -53,7 +76,7 @@ def classify(message: Message, config: Config, contacts: Mapping[str, Contact | 
         return Decision("skip", "only never-log/internal participants")
     matched = tuple({c.id: c for addr in eligible if (c := contacts.get(addr))}.values())
     if not approved:
-        content = f"{message.subject}\n{message.text}\n{message.html}".casefold()
+        content = f"{message.subject}\n{message.text}\n{message.html}\n{visible_html(message.html)}".casefold()
         for keyword in config.review_keywords:
             if re.search(r"(?<!\w)" + re.escape(keyword.casefold()).replace(r"\ ", r"\s+") + r"(?!\w)", content):
                 return Decision("review", f"review keyword: {keyword}")
