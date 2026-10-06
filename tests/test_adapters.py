@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from crm_mail_sync.adapters.gmail import GmailSource, normalise
+from crm_mail_sync.adapters.gmail import READ_RETRIES, GmailSource, normalise
 from crm_mail_sync.adapters.hubspot import EMAIL_TO_DEAL, HubSpotCrm, email_payload
 from crm_mail_sync.models import Associations, timestamp
 from crm_mail_sync.pipeline import evaluate
@@ -68,6 +68,25 @@ def test_gmail_pagination_and_thread_privacy(config):
     assert all(config.private_label in m.thread_labels for m in messages)
     assert mailbox.list.call_args_list[1].kwargs['pageToken'] == 'page-2'
     assert users.threads.return_value.get.call_count == 1
+    # Threads are read for labels only, and every read backs off on rate limits.
+    assert users.threads.return_value.get.call_args.kwargs['format'] == 'minimal'
+    for request in (mailbox.list.return_value, mailbox.get.return_value, users.threads.return_value.get.return_value):
+        assert all(call.kwargs == {'num_retries': READ_RETRIES} for call in request.execute.call_args_list)
+
+
+def test_gmail_http_errors_stop_cleanly_without_content(config):
+    from googleapiclient.errors import HttpError
+    service = Mock()
+    users = service.users.return_value
+    users.labels.return_value.list.return_value.execute.return_value = {'labels': []}
+    response = Mock(status=403, reason='Forbidden')
+    users.messages.return_value.list.return_value.execute.side_effect = HttpError(
+        response, b'{"error": "Quota exceeded; quoted body: secret-subject"}')
+    source = GmailSource(config.gmail_token_path, service=service)
+    with pytest.raises(RuntimeError) as exc:
+        source.messages(timestamp('2026-10-01T00:00:00Z'))
+    assert '403' in str(exc.value)
+    assert 'secret-subject' not in str(exc.value)
 
 
 def test_hubspot_payload_contract(config, source, crm):
@@ -136,6 +155,7 @@ def test_hubspot_dedupe_and_create_contract(source):
 
 def test_hubspot_http_errors_do_not_expose_secrets(monkeypatch):
     monkeypatch.setenv('TEST_TOKEN', 'secret-not-to-print')
+    monkeypatch.setattr('crm_mail_sync.adapters.hubspot.time.sleep', lambda seconds: None)
     def fail(*args, **kwargs):
         raise HTTPError('https://api.hubapi.com', 429, 'secret-not-to-print', {}, None)
     monkeypatch.setattr('crm_mail_sync.adapters.hubspot.urlopen', fail)
@@ -151,3 +171,48 @@ def test_unreadable_and_encrypted_mime_are_incomplete():
     assert normalise(raw, {}, ()).incomplete
     raw['payload']['parts'] = [{'mimeType':'text/plain','body':{'data':'a'}}]
     assert normalise(raw, {}, ()).incomplete
+
+
+@pytest.mark.parametrize('name,value,expected', [
+    ('List-Unsubscribe', '<mailto:leave@example.org>', True),
+    ('List-Id', 'News <news.example.org>', True),
+    ('Precedence', 'bulk', True),
+    ('Precedence', 'first-class', False),
+    ('Auto-Submitted', 'auto-generated', True),
+    ('Auto-Submitted', 'no', False),
+])
+def test_mailing_list_headers(name, value, expected):
+    raw = raw_message()
+    raw['payload']['headers'].append({'name': name, 'value': value})
+    assert normalise(raw, {}, ()).mailing_list is expected
+    assert normalise(raw_message(), {}, ()).mailing_list is False
+
+
+def test_hubspot_retries_rate_limited_reads_but_never_creates(monkeypatch):
+    monkeypatch.setenv('TEST_TOKEN', 'token')
+    sleeps, calls = [], []
+    monkeypatch.setattr('crm_mail_sync.adapters.hubspot.time.sleep', sleeps.append)
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, *args): return b'{"results": []}'
+
+    def flaky(request, timeout):
+        calls.append(request.full_url)
+        if len(calls) <= 2:
+            raise HTTPError(request.full_url, 429, 'slow down', {'Retry-After': '3'}, None)
+        return Response()
+    monkeypatch.setattr('crm_mail_sync.adapters.hubspot.urlopen', flaky)
+    assert HubSpotCrm('TEST_TOKEN').contact('partner@example.org') is None
+    assert len(calls) == 3 and 3.0 in sleeps
+
+    calls.clear()
+    def always_429(request, timeout):
+        calls.append(request.full_url)
+        raise HTTPError(request.full_url, 429, 'slow down', {}, None)
+    monkeypatch.setattr('crm_mail_sync.adapters.hubspot.urlopen', always_429)
+    crm = HubSpotCrm('TEST_TOKEN')
+    with pytest.raises(RuntimeError, match='429'):
+        crm.request('POST', '/crm/v3/objects/emails', {'properties': {}})
+    assert len(calls) == 1, 'a create must never be retried blindly'

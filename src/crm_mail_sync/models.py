@@ -37,6 +37,7 @@ class Message:
     thread_labels: tuple[str, ...] = ()
     has_calendar: bool = False
     incomplete: bool = False
+    mailing_list: bool = False  # List-Id, List-Unsubscribe, Precedence or Auto-Submitted header
 
     @property
     def participants(self) -> tuple[Address, ...]:

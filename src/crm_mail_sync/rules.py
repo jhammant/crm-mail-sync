@@ -35,7 +35,7 @@ def hard_skip(message: Message, config: Config) -> str | None:
         return "draft, spam or trash"
     if message.has_calendar or CALENDAR.match(message.subject):
         return "calendar robot"
-    if BULK.fullmatch(message.sender.email.partition("@")[0]):
+    if message.mailing_list or BULK.fullmatch(message.sender.email.partition("@")[0]):
         return "bulk sender"
     return None
 

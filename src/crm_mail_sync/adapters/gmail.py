@@ -10,6 +10,19 @@ from collections.abc import Callable
 from ..models import Address, Message, timestamp
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
+# Reads are idempotent, so the client library may back off and retry them on 429,
+# 403 rate-limit and 5xx responses. Eight retries waits up to about four minutes,
+# enough to ride out Gmail's per-minute, per-user quota window.
+READ_RETRIES = 8
+
+
+def mailing_list(headers: dict[str, list[str]]) -> bool:
+    """Headers that mark list, bulk or machine mail (RFC 2369, RFC 2919, RFC 3834)."""
+    if headers.get('list-id') or headers.get('list-unsubscribe'):
+        return True
+    if any(v.strip().lower() in {'bulk', 'list', 'junk'} for v in headers.get('precedence', [])):
+        return True
+    return any(v.strip().lower() != 'no' for v in headers.get('auto-submitted', []))
 
 
 def decode(value: str) -> str:
@@ -66,7 +79,8 @@ def normalise(raw: dict, label_names: dict[str, str], thread_labels: tuple[str, 
                    sender=senders[0] if senders else Address(''), to=to, cc=cc,
                    subject=decode(headers.get('subject', [''])[0]), text='\n'.join(text), html='\n'.join(html),
                    labels=tuple(label_names.get(x, x) for x in raw.get('labelIds', [])),
-                   thread_labels=thread_labels, has_calendar=has_calendar, incomplete=incomplete)
+                   thread_labels=thread_labels, has_calendar=has_calendar, incomplete=incomplete,
+                   mailing_list=mailing_list(headers))
 
 
 class GmailSource:
@@ -84,13 +98,23 @@ class GmailSource:
             service = build('gmail', 'v1', credentials=credentials, cache_discovery=False)
         self.service = service
         self.label_names = {label['id']: label['name'] for label in
-                            service.users().labels().list(userId='me').execute().get('labels', [])}
+                            self._execute(service.users().labels().list(userId='me')).get('labels', [])}
         self._threads: dict[str, dict] = {}
+
+    @staticmethod
+    def _execute(request) -> dict:
+        from googleapiclient.errors import HttpError
+        try:
+            return request.execute(num_retries=READ_RETRIES)
+        except HttpError as exc:
+            # Never print response bodies: they can quote message content.
+            raise RuntimeError(f'Gmail API request failed (HTTP {exc.status_code}); run stopped') from None
 
     def _thread(self, thread_id: str) -> dict:
         if thread_id not in self._threads:
-            self._threads[thread_id] = self.service.users().threads().get(
-                userId='me', id=thread_id, format='full').execute()
+            # Only labels are needed from the thread: 'minimal' skips every body.
+            self._threads[thread_id] = self._execute(self.service.users().threads().get(
+                userId='me', id=thread_id, format='minimal'))
         return self._threads[thread_id]
 
     def _normalise(self, raw: dict) -> Message:
@@ -98,8 +122,8 @@ class GmailSource:
         labels = tuple(sorted({self.label_names.get(label, label) for m in thread.get('messages', [])
                                for label in m.get('labelIds', [])}))
         def attachment(attachment_id: str) -> str:
-            return self.service.users().messages().attachments().get(
-                userId='me', messageId=raw['id'], id=attachment_id).execute()['data']
+            return self._execute(self.service.users().messages().attachments().get(
+                userId='me', messageId=raw['id'], id=attachment_id))['data']
         message = normalise(raw, self.label_names, labels, attachment)
         if not thread.get('messages'):
             from dataclasses import replace
@@ -111,11 +135,11 @@ class GmailSource:
         messages = []
         page = None
         while True:
-            result = self.service.users().messages().list(
+            result = self._execute(self.service.users().messages().list(
                 userId='me', q=f'after:{math.floor(since.timestamp()) - 1}',
-                maxResults=500, pageToken=page).execute()
+                maxResults=500, pageToken=page))
             for row in result.get('messages', []):
-                raw = self.service.users().messages().get(userId='me', id=row['id'], format='full').execute()
+                raw = self._execute(self.service.users().messages().get(userId='me', id=row['id'], format='full'))
                 message = self._normalise(raw)
                 if message.timestamp >= since:
                     messages.append(message)
@@ -126,5 +150,5 @@ class GmailSource:
 
     def get_message(self, message_id: str) -> Message:
         self._threads.clear()
-        raw = self.service.users().messages().get(userId='me', id=message_id, format='full').execute()
+        raw = self._execute(self.service.users().messages().get(userId='me', id=message_id, format='full'))
         return self._normalise(raw)

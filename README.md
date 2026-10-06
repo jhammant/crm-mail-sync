@@ -61,7 +61,7 @@ Rules run in this order. The first match wins.
 | 1 | Message or any message in its thread carries your private label | skip |
 | 2 | Draft, spam or trash | skip |
 | 3 | Calendar robot (`Accepted:`, `Invitation:` and similar, or a `text/calendar` part) | skip |
-| 4 | Bulk sender (`no-reply`, `notifications`, `mailer-daemon`) | skip |
+| 4 | Bulk or list mail: a `no-reply`, `notifications` or `mailer-daemon` sender, or a `List-Id`, `List-Unsubscribe`, `Precedence: bulk` or `Auto-Submitted` header | skip |
 | 5 | Malformed or unreadable message | review |
 | 6 | Only internal participants | skip |
 | 7 | Only internal and never-log participants | skip |
@@ -84,7 +84,7 @@ python3 -m venv .venv
 .venv/bin/pip install --no-deps -e .
 source .venv/bin/activate
 
-python -m pytest -q        # 57 tests, fully offline
+python -m pytest -q        # 66 tests, fully offline
 crm-mail-sync run --config examples/config.example.yaml \
   --source fixtures/sample-mailbox.json --crm fake --dry-run
 ```
@@ -170,7 +170,7 @@ All keys are top level. Unknown keys and malformed values fail before anything r
 | `internal_domains` | Your company's domains. Subdomains match too. |
 | `never_log` | Exact addresses or domains (subdomains included) that never get an email on their record. May be empty. |
 | `private_label` | Exact Gmail label name. On any message in a thread, it is a hard skip for the whole thread. |
-| `review_keywords` | Case-insensitive words or phrases that send a message to review. Matched on word boundaries, so `board` does not match `onboarding`. May be empty. |
+| `review_keywords` | Case-insensitive words or phrases that send a message to review. Matched on word boundaries, so `board` does not match `onboarding`. Quoted replies are matched too, so avoid words found in email disclaimers such as `confidential` or `privileged`: on a real mailbox they sent every reply to a disclaimer-carrying sender to review. May be empty. |
 | `state_path` | JSON outcome ledger and run cursor. A neighbouring `.lock` file serialises writers. |
 | `review_path` | Append-only JSONL review queue, holding message snapshots and resolutions. |
 | `gmail_token_path` | Authorised-user OAuth token JSON. |
@@ -202,12 +202,15 @@ The exit status is non-zero on configuration, API or persistence failures, so al
 - Each run checkpoints its start time and re-reads 24 hours of overlap to catch late-indexed mail. Recorded message IDs make overlap harmless. `--since` widens the fetch window; it never replays recorded outcomes.
 - Each message is saved atomically and a failure never advances the cursor.
 - Before creating an email the tool searches HubSpot for the same subject within two minutes either side, in case HubSpot already logged it. This can suppress an unrelated email with an identical subject at the same moment.
-- HubSpot writes are not transactional. If a run crashes after HubSpot creates an email but before the local save, check HubSpot before rerunning. The adapter deliberately does not retry writes or HTTP 429s blindly.
+- Every Gmail read and HubSpot read or search backs off and retries on rate limits (HTTP 429, Gmail's per-minute quota) and gateway errors, honouring `Retry-After`. HubSpot requests are paced under its five-per-second search limit, which the token may share with other integrations.
+- Creating an email is never retried: a timeout after HubSpot accepted it would log the email twice. HubSpot writes are not transactional either, so if a run crashes after HubSpot creates an email but before the local save, check HubSpot before rerunning.
 - Open deals exclude `closedwon`, `closedlost` and any custom stage with `hs_is_closed` true, then take the five most recently modified per contact.
 
 ## Status and roadmap
 
-v0.1 is alpha. Every rule, adapter payload and CLI path is covered by offline tests against recorded API shapes; treat your first live runs as a dry-run-first rollout.
+v0.1 is alpha. Every rule, adapter payload and CLI path is covered by offline tests, and it has been dry-run against a real Google Workspace mailbox and HubSpot portal (88 messages: no errors, nothing written, and every email HubSpot had already logged itself was recognised and not duplicated). Still roll out dry-run first: your mail will differ.
+
+Live testing changed three things before release: rate-limit backoff for Gmail and HubSpot reads, list and bulk headers as a skip rule, and dropping `confidential` from the suggested keywords.
 
 Not yet built:
 

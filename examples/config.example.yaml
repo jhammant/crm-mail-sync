@@ -2,7 +2,8 @@ mailbox_addresses: [operator@example.com]
 internal_domains: [example.com]
 never_log: [investor@example.org]
 private_label: Private - no CRM
-review_keywords: [term sheet, investment, board, salary, confidential]
+# Avoid words found in email disclaimers (confidential, privileged): quoted replies carry them.
+review_keywords: [term sheet, investment, board meeting, salary, strictly confidential]
 # Paths are relative to this config file. Put your real config outside the repo.
 state_path: ../.local/state.json
 review_path: ../.local/review.jsonl

@@ -39,6 +39,11 @@ def test_bulk_variants(config, source, crm, sender):
     assert classify(message, config, crm.contacts).reason == 'bulk sender'
 
 
+def test_mailing_list_headers_are_bulk_even_from_a_known_contact(config, source, crm):
+    message = replace(source.get_message('intro'), mailing_list=True)
+    assert classify(message, config, crm.contacts).reason == 'bulk sender'
+
+
 def test_domain_boundary_and_never_log_domain(config, source, crm):
     assert domain_matches('someone@child.example.org', 'example.org')
     assert not domain_matches('someone@notexample.org', 'example.org')

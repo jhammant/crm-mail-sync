@@ -1,6 +1,7 @@
 """HubSpot REST adapter. Transport is injectable for offline contract tests."""
 import json
 import os
+import time
 from collections.abc import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
@@ -12,6 +13,17 @@ EMAIL_TO_CONTACT = 198
 EMAIL_TO_COMPANY = 186
 # Confirm this HUBSPOT_DEFINED type against the live associations API before first real use.
 EMAIL_TO_DEAL = 210
+
+# CRM search allows about five requests a second per token, shared with anything else
+# using it. Pace every request, and retry rate limits and gateway errors on reads only.
+MIN_INTERVAL = 0.25
+READ_RETRIES = 5
+RETRYABLE = {429, 502, 503, 504}
+
+
+def idempotent(method: str, path: str) -> bool:
+    """Reads and searches are safe to repeat; creating an email is not (it could log twice)."""
+    return method == 'GET' or path.split('?')[0].endswith(('/search', '/batch/read'))
 
 
 def email_payload(message: Message, associations: Associations, direction: str,
@@ -37,6 +49,14 @@ def email_payload(message: Message, associations: Associations, direction: str,
     return {'properties': properties, 'associations': links}
 
 
+def retry_after(exc: HTTPError, attempt: int) -> float:
+    """HubSpot's Retry-After header when present, else 1, 2, 4, 8, 16 seconds."""
+    try:
+        return min(60.0, float(exc.headers.get('Retry-After', '')))
+    except (AttributeError, TypeError, ValueError):
+        return float(2 ** attempt)
+
+
 class HubSpotCrm:
     def __init__(self, token_env: str, owner_id: str | None = None, *,
                  transport: Callable[[str, str, dict | None], dict] | None = None):
@@ -46,20 +66,31 @@ class HubSpotCrm:
             raise ValueError(f'Missing HubSpot token environment variable: {token_env}')
         self.request = transport or self._request
         self._contacts: dict[str, Contact | None] = {}
+        self._last_request = 0.0
 
     def _request(self, method: str, path: str, body: dict | None = None) -> dict:
-        request = Request('https://api.hubapi.com' + path,
-                          data=json.dumps(body).encode() if body is not None else None,
-                          headers={'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'},
-                          method=method)
-        try:
-            with urlopen(request, timeout=30) as response:
-                return json.load(response)
-        except HTTPError as exc:
-            # Never print response bodies, request headers or tokens.
-            raise RuntimeError(f'HubSpot {method} request failed (HTTP {exc.code}); run stopped') from None
-        except URLError:
-            raise RuntimeError('HubSpot connection failed; run stopped') from None
+        attempts = READ_RETRIES + 1 if idempotent(method, path) else 1
+        for attempt in range(attempts):
+            wait = MIN_INTERVAL - (time.monotonic() - self._last_request)
+            if wait > 0:
+                time.sleep(wait)
+            self._last_request = time.monotonic()
+            request = Request('https://api.hubapi.com' + path,
+                              data=json.dumps(body).encode() if body is not None else None,
+                              headers={'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json'},
+                              method=method)
+            try:
+                with urlopen(request, timeout=30) as response:
+                    return json.load(response)
+            except HTTPError as exc:
+                if exc.code in RETRYABLE and attempt + 1 < attempts:
+                    time.sleep(retry_after(exc, attempt))
+                    continue
+                # Never print response bodies, request headers or tokens.
+                raise RuntimeError(f'HubSpot {method} request failed (HTTP {exc.code}); run stopped') from None
+            except URLError:
+                raise RuntimeError('HubSpot connection failed; run stopped') from None
+        raise AssertionError('unreachable')
 
     def _associations(self, contact_id: str, kind: str) -> list[dict]:
         rows = []
