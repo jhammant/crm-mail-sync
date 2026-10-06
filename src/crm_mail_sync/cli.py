@@ -1,6 +1,7 @@
 """Log the right emails to HubSpot, with explicit rules and a human review queue."""
 import argparse
 from datetime import date
+import json
 import sys
 
 from .adapters.fake import FakeCrm
@@ -11,14 +12,30 @@ from .adapters.review_jsonl import JsonlReviewSink
 from .config import load_config
 from .models import timestamp
 from .pipeline import format_outcome, resolve_review, run
+from .state import State
+
+
+def status(config, review: JsonlReviewSink) -> dict:
+    """Last run, outcome counts and the pending review queue. Read-only: no lock, no writes."""
+    state = State(config.state_path)
+    outcomes = list(state.data['outcomes'].values())
+    pending = [{'id': message_id, 'reason': row['reason'], 'subject': row['message']['subject'],
+                'from': row['message']['sender'], 'timestamp': row['message']['timestamp'],
+                'thread_id': row['message']['thread_id']}
+               for message_id, row in review.pending().items()]
+    return {'mailbox': config.mailbox_addresses[0], 'last_run': state.data.get('last_run'),
+            'outcomes': {action: sum(o['action'] == action for o in outcomes) for action in ('log', 'skip', 'review')},
+            'pending': sorted(pending, key=lambda item: item['timestamp'])}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='crm-mail-sync', description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    for command in ('run', 'review', 'approve', 'skip'):
+    for command in ('run', 'review', 'approve', 'skip', 'status'):
         sub = commands.add_parser(command)
         sub.add_argument('--config', required=True)
+        if command == 'status':
+            sub.add_argument('--json', action='store_true', help='Machine-readable, for integrations')
         if command in {'approve', 'skip'}:
             sub.add_argument('message_id')
         if command in {'run', 'approve'}:
@@ -36,6 +53,15 @@ def main(argv: list[str] | None = None) -> int:
             for message_id, row in pending.items():
                 print(' '.join(f"{message_id}: {row['reason']} | {row['message']['subject']}".split()))
             print(f'{len(pending)} pending review item(s)')
+            return 0
+        if args.command == 'status':
+            report = status(config, review)
+            if args.json:
+                print(json.dumps(report))
+            else:
+                counts = report['outcomes']
+                print(f"last run: {report['last_run'] or 'never'}; logged {counts['log']}, skipped {counts['skip']}, "
+                      f"{len(report['pending'])} pending review")
             return 0
         if args.command == 'skip':
             resolve_review(config, None, None, review, args.message_id, approve=False)

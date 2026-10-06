@@ -1,0 +1,14 @@
+{
+  "id": "crm-mail-sync",
+  "name": "CRM mail sync",
+  "description": "The crm-mail-sync review queue: approve or skip emails waiting to be logged to HubSpot",
+  "version": "0.1.0",
+  "command": ["./roost_plugin.py"],
+  "interval": 300,
+  "timeout": 20,
+  "env": {
+    "CRM_MAIL_SYNC_CONFIG": "~/.config/crm-mail-sync/config.yaml",
+    "CRM_MAIL_SYNC_ENV_FILE": "~/.config/crm-mail-sync/env"
+  },
+  "requires": ["python3", "crm-mail-sync"]
+}

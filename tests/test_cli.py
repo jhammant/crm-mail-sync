@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import os
 import re
@@ -53,7 +54,7 @@ def test_config_validation_and_cli_errors(tmp_path, capsys):
 
 def test_repository_sample_privacy():
     paths = [Path('README.md')]
-    for directory in ['src','examples','fixtures']:
+    for directory in ['src','examples','fixtures','integrations']:
         paths.extend(p for p in Path(directory).rglob('*') if p.is_file() and '__pycache__' not in p.parts)
     email = re.compile(r'[\w.+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})')
     failures = []
@@ -62,3 +63,28 @@ def test_repository_sample_privacy():
             if domain.lower() not in {'example.com','example.org'}:
                 failures.append(f'{path}: non-example address')
     assert failures == []
+
+
+def test_status_reports_queue_and_counts_without_writing(tmp_path, capsys):
+    config = tmp_path / 'config.yaml'
+    example = Path('examples/config.example.yaml').read_text()
+    config.write_text(example.replace('../.local/', str(tmp_path) + '/'))
+    assert main(['status', '--config', str(config), '--json']) == 0
+    empty = json.loads(capsys.readouterr().out)
+    assert empty == {'mailbox': 'operator@example.com', 'last_run': None,
+                     'outcomes': {'log': 0, 'skip': 0, 'review': 0}, 'pending': []}
+    assert not (tmp_path / 'state.json').exists(), 'status must never create state'
+
+    assert main(['run', '--config', str(config), '--source', 'fixtures/sample-mailbox.json', '--crm', 'fake']) == 0
+    capsys.readouterr()
+    before = (tmp_path / 'state.json').read_bytes(), (tmp_path / 'review.jsonl').read_bytes()
+    assert main(['status', '--config', str(config), '--json']) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report['last_run'] is not None
+    assert report['outcomes'] == {'log': 1, 'skip': 8, 'review': 4}
+    assert [item['id'] for item in report['pending']] == ['unknown-with-investor', 'keyword', 'unknown', 'incomplete']
+    assert set(report['pending'][0]) == {'id', 'reason', 'subject', 'from', 'timestamp', 'thread_id'}
+    assert ((tmp_path / 'state.json').read_bytes(), (tmp_path / 'review.jsonl').read_bytes()) == before
+
+    assert main(['status', '--config', str(config)]) == 0
+    assert capsys.readouterr().out.startswith('last run: ')

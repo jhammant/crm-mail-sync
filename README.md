@@ -84,7 +84,7 @@ python3 -m venv .venv
 .venv/bin/pip install --no-deps -e .
 source .venv/bin/activate
 
-python -m pytest -q        # 66 tests, fully offline
+python -m pytest -q        # 70 tests, fully offline
 crm-mail-sync run --config examples/config.example.yaml \
   --source fixtures/sample-mailbox.json --crm fake --dry-run
 ```
@@ -159,6 +159,19 @@ crm-mail-sync skip    MESSAGE_ID --config ~/.config/crm-mail-sync/config.yaml
 ```
 
 Approval re-fetches the live message and re-applies every privacy rule, so a private label added after queueing still wins. Approval only overrides keyword review. It never creates contacts: add an unknown person to HubSpot first, then approve.
+
+`crm-mail-sync status --config ... --json` prints the last run, outcome counts and pending items as JSON for dashboards and other integrations. It reads only, takes no lock and writes nothing.
+
+### 5. Optional: the review queue in your menu bar
+
+[Roost](https://github.com/jhammant/roost) can show the queue in the macOS menu bar: a badge with the number of emails waiting, and per email *Open in Gmail*, *Log to HubSpot…* (with a confirmation) and *Skip*. The plugin ships in [`integrations/roost/`](integrations/roost/):
+
+```bash
+ln -s "$PWD/.venv/bin/crm-mail-sync" ~/.local/bin/crm-mail-sync   # Roost needs it on the PATH
+Roost --install-plugin integrations/roost
+```
+
+It reads `~/.config/crm-mail-sync/config.yaml` and, for approvals and syncs, the `HUBSPOT_TOKEN` in `~/.config/crm-mail-sync/env` (the same file as the cron example below). Change either path in `integrations/roost/plugin.json`.
 
 ## Configuration
 
