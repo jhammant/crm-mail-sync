@@ -12,10 +12,16 @@ scratchpads/
 .local/
 *.egg-info/
 .venv/
-.codex-run.log
 state.json
 *.jsonl
 *.lock
 *token*.json
 *credentials*.json
 !requirements.lock
+
+# Local working notes and agent session files; never published
+STATE.md
+FORK.md
+reference/
+.sessions/
+.codex-*

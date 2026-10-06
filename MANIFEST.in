@@ -1,0 +1,4 @@
+include LICENSE README.md SECURITY.md requirements.lock
+recursive-include tests *.py
+recursive-include fixtures *.json
+recursive-include examples *.yaml

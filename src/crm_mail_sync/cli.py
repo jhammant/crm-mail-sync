@@ -1,4 +1,4 @@
-"""Command line entry point."""
+"""Log the right emails to HubSpot, with explicit rules and a human review queue."""
 import argparse
 from datetime import date
 import sys

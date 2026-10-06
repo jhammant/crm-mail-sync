@@ -5,14 +5,36 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "crm-mail-sync"
 version = "0.1.0"
-description = "Selective, rules-based email logging with a human review queue"
+description = "Log the right emails to HubSpot: explicit rules, never-log contacts that still allow intros, and a human review queue"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Jon Hammant" }]
+keywords = ["hubspot", "crm", "gmail", "email-logging", "privacy", "review-queue"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Communications :: Email",
+    "Topic :: Office/Business",
+]
 dependencies = ["PyYAML==6.0.3", "google-api-python-client==2.184.0", "google-auth-oauthlib==1.2.2"]
 
 [project.optional-dependencies]
 dev = ["pytest==9.0.2", "setuptools==80.9.0"]
+
+[project.urls]
+Homepage = "https://github.com/jhammant/crm-mail-sync"
+Issues = "https://github.com/jhammant/crm-mail-sync/issues"
 
 [project.scripts]
 crm-mail-sync = "crm_mail_sync.cli:main"
