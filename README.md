@@ -1,33 +1,105 @@
 # crm-mail-sync
 
-Log selected business emails to HubSpot using explicit rules and a human review queue. Python 3.11+, MIT licensed, no LLM, no server. Runs on macOS or Linux.
+**Log the right emails to HubSpot, and only the right ones.**
 
-HubSpot's automatic logging and Never Log list cannot express "log this introduction to the partner, but never to the investor". Keep sensitive addresses or domains on HubSpot's own Never Log list and let this tool create selected email engagements. It associates eligible existing contacts, their primary companies and up to five recent open deals per contact.
+HubSpot's "log all emails" setting has two controls: log for existing contacts only, and a Never Log list of addresses or domains. That is too coarse for a common case. Your lead investor is also the person who introduces you to half your partners.
 
-## Quick start and offline acceptance
+- **Leave the investor unblocked** and every fundraising and board thread appears on their record, visible to everyone with CRM access.
+- **Block the investor** and the intro threads stop reaching the *partner's* record too, because HubSpot skips the whole message.
 
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.lock
-.venv/bin/python -m pip install --no-deps --no-build-isolation -e .
-source .venv/bin/activate
-python3 -m pytest -q
-python3 -m crm_mail_sync.cli run --config examples/config.example.yaml --source fixtures/sample-mailbox.json --crm fake --dry-run
+crm-mail-sync fixes that. Keep sensitive people on HubSpot's own Never Log list and let this tool log emails selectively. A business email goes onto the record of every external customer or partner on the thread, even when a never-log person is on it too. Internal, investor-only, private and robot mail is skipped. Anything ambiguous goes to a review queue for a human to decide. It never guesses.
+
+It is a plain Python CLI you run on a schedule. No LLM, no server, no database.
+
+```mermaid
+flowchart LR
+    G[Gmail<br/>read-only] --> N[Normalise<br/>participants, labels,<br/>MIME parts]
+    N --> R{Rules}
+    R -->|private label, calendar,<br/>bulk, internal-only,<br/>never-log only| S[Skip]
+    R -->|review keyword,<br/>unknown contact,<br/>incomplete message| Q[Review queue<br/>JSONL]
+    R -->|existing eligible<br/>contact| L[Log to HubSpot]
+    L --> H[(Email engagement<br/>+ contacts<br/>+ primary companies<br/>+ up to 5 open deals each)]
+    Q -->|approve| R
+    Q -->|skip| S
+    S & L & Q --> St[State ledger<br/>so reruns do nothing new]
 ```
 
-Installation downloads dependencies; both acceptance commands subsequently run offline. The checked-in root symlink supports the requested `python3 -m` invocation without installation. The installed console command is `crm-mail-sync`. Tests refuse network connections and keep their temporary files inside this directory.
+## What a run looks like
 
-The sample contains 13 messages: one log, eight skips and four reviews. Fake CRM data lives alongside messages in the fixture. A fake CRM starts fresh on each invocation; local state and queue files persist on non-dry runs. Use a separate config and state directory for experiments.
+The repository ships a sample mailbox and a fake CRM, so you can see every rule fire without credentials:
+
+```bash
+crm-mail-sync run --config examples/config.example.yaml \
+  --source fixtures/sample-mailbox.json --crm fake --dry-run
+```
+
+```text
+2026-10-02T09:00:00+00:00 received log intro: existing eligible contacts contacts=partner@example.org companies=company-partner deals=d7,d6,d5,d4,d3
+2026-10-02T09:01:00+00:00 sent skip investor-only: only never-log/internal participants
+2026-10-02T09:02:00+00:00 sent skip internal-only: internal-only participants
+2026-10-02T09:03:00+00:00 sent skip private-message: private label
+2026-10-02T09:04:00+00:00 sent skip private-thread: private label
+2026-10-02T09:05:00+00:00 sent skip calendar-subject: calendar robot
+2026-10-02T09:06:00+00:00 sent skip calendar-part: calendar robot
+2026-10-02T09:07:00+00:00 received skip bulk: bulk sender
+2026-10-02T09:08:00+00:00 sent review unknown-with-investor: unknown external participants with never-log participant
+2026-10-02T09:09:00+00:00 sent review keyword: review keyword: term sheet
+2026-10-02T09:10:00+00:00 sent skip already-logged: already in CRM (subject within 2 minutes)
+2026-10-02T09:11:00+00:00 sent review unknown: no eligible CRM contacts; cannot decide
+2026-10-02T09:12:00+00:00 sent review incomplete: incomplete message or participants
+dry-run: 13 message(s); log=1 skip=8 review=4
+```
+
+The first line is the whole point: an intro the investor sent to you and a partner is logged against the partner, the partner's company and the partner's five most recent open deals. It is not logged against the investor.
+
+## How it decides
+
+Rules run in this order. The first match wins.
+
+| # | Condition | Action |
+| --- | --- | --- |
+| 1 | Message or any message in its thread carries your private label | skip |
+| 2 | Draft, spam or trash | skip |
+| 3 | Calendar robot (`Accepted:`, `Invitation:` and similar, or a `text/calendar` part) | skip |
+| 4 | Bulk sender (`no-reply`, `notifications`, `mailer-daemon`) | skip |
+| 5 | Malformed or unreadable message | review |
+| 6 | Only internal participants | skip |
+| 7 | Only internal and never-log participants | skip |
+| 8 | Subject or body matches a review keyword (`term sheet`, `salary`, ...) | review |
+| 9 | At least one external participant is an existing HubSpot contact not on never-log | **log** |
+| 10 | Unknown external people alongside a never-log person | review |
+| 11 | Anything else | review |
+
+Never-log people never get an email on their record, and their presence never stops logging for other people on the same message.
+
+## Install
+
+Python 3.11 or newer, on macOS or Linux.
+
+```bash
+git clone https://github.com/jhammant/crm-mail-sync.git
+cd crm-mail-sync
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.lock
+.venv/bin/pip install --no-deps -e .
+source .venv/bin/activate
+
+python -m pytest -q        # 57 tests, fully offline
+crm-mail-sync run --config examples/config.example.yaml \
+  --source fixtures/sample-mailbox.json --crm fake --dry-run
+```
+
+`requirements.lock` pins the complete environment. Tests refuse network connections.
 
 ## Setup for a real mailbox
 
-Copy `examples/config.example.yaml` to a private directory outside your checkout. Keep real addresses, credentials, state and review files there. Set an explicit initial date; the first run starts at midnight UTC on that date.
+Copy `examples/config.example.yaml` to a private directory outside your checkout, for example `~/.config/crm-mail-sync/config.yaml`. Real addresses, tokens, state and the review queue all live there, never in the repo.
 
-### Gmail desktop OAuth
+### 1. Gmail (read-only)
 
-Enable the Gmail API in a Google Cloud project, configure the consent screen, add your account as a test user if needed, and create an OAuth client of type **Desktop app**. Download its client JSON to your private configuration directory. Authorise only `https://www.googleapis.com/auth/gmail.readonly`. Google documents the [desktop Python authorisation flow](https://developers.google.com/workspace/gmail/api/quickstart/python) and [full thread retrieval](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.threads/get).
+Enable the Gmail API in a Google Cloud project, configure the consent screen and create an OAuth client of type **Desktop app**. Download its client JSON into your private directory. The tool only ever asks for `https://www.googleapis.com/auth/gmail.readonly`. Google's [Python quickstart](https://developers.google.com/workspace/gmail/api/quickstart/python) covers the console steps.
 
-Run this once with the installed dependencies, substituting your private paths:
+Authorise once:
 
 ```python
 import os
@@ -46,75 +118,105 @@ with os.fdopen(fd, 'w') as stream:
     stream.write(credentials.to_json())
 ```
 
-Set `gmail_token_path` to the resulting file. The run command reads existing credentials and refreshes access tokens in memory. It does not open an interactive OAuth flow or rewrite the token file. Expired/revoked refresh credentials require repeating authorisation. Configure the consent app appropriately for unattended use; testing-mode credentials can expire.
+Point `gmail_token_path` at the resulting file. Runs refresh the access token in memory and never rewrite the token file or open a browser. If your consent screen is in testing mode, Google expires refresh tokens after seven days; publish the app (internal is fine for Workspace) for unattended use.
 
-### HubSpot
+### 2. HubSpot
 
-Create a private-app/service-key token with these scopes: `crm.objects.contacts.read`, `crm.objects.contacts.write`, `crm.objects.companies.read`, `crm.objects.deals.read`, `sales-email-read`. Put the token in the environment variable named by `hubspot_token_env`; never in YAML or command arguments. The scheduler must supply that environment too.
+Create a private app (or service key) token with these scopes:
 
-Email creation uses REST v3 and explicit contact/company/deal associations. Contact association type 198, company 186 and deal 210 are listed in the [official association table](https://developers.hubspot.com/docs/api-reference/latest/crm/associations/associate-records/guide#email-to-object). Before first real use, confirm the email-to-deal type against `GET /crm/v4/associations/emails/deals/labels` in your account. The code keeps 210 in one constant with that reminder. Primary company selection uses the labelled primary association, not an arbitrary associated company.
+- `crm.objects.contacts.read`
+- `crm.objects.contacts.write`
+- `crm.objects.companies.read`
+- `crm.objects.deals.read`
+- `sales-email-read`
+
+Put the token in the environment variable named by `hubspot_token_env` (default `HUBSPOT_TOKEN`). Never put it in YAML or on the command line.
+
+Emails are created with REST v3 and explicit associations: contact `198`, company `186`, deal `210`, all `HUBSPOT_DEFINED` (see HubSpot's [association type table](https://developers.hubspot.com/docs/api-reference/latest/crm/associations/associate-records/guide#email-to-object)). Before your first real run, confirm the deal type in your portal:
 
 ```bash
-crm-mail-sync run --config /private/config.yaml --since 2026-10-01 --dry-run
-crm-mail-sync run --config /private/config.yaml
-crm-mail-sync review --config /private/config.yaml
-crm-mail-sync approve MESSAGE_ID --config /private/config.yaml
-crm-mail-sync skip MESSAGE_ID --config /private/config.yaml
+curl -s -H "Authorization: Bearer $HUBSPOT_TOKEN" \
+  https://api.hubapi.com/crm/v4/associations/emails/deals/labels
 ```
 
-A live dry-run makes read/search API requests, prints decisions and associations, and writes no CRM records, state, queue, lock or token files. It still requires credentials. Each output row includes the UTC timestamp, sent/received direction, action and reason; log rows include eligible contact emails, company IDs and deal IDs.
+If it differs, change `EMAIL_TO_DEAL` in `src/crm_mail_sync/adapters/hubspot.py`.
 
-## Configuration reference
+### 3. Dry-run, then run
 
-All keys are top-level YAML. Unknown keys and malformed values fail before processing. Relative paths resolve against the config file's directory.
+```bash
+crm-mail-sync run --config ~/.config/crm-mail-sync/config.yaml --since 2026-10-01 --dry-run
+crm-mail-sync run --config ~/.config/crm-mail-sync/config.yaml
+```
+
+A live dry-run reads Gmail and searches HubSpot but writes nothing: no CRM records, state, queue, lock or token files.
+
+### 4. Work the review queue
+
+```bash
+crm-mail-sync review  --config ~/.config/crm-mail-sync/config.yaml   # list pending items
+crm-mail-sync approve MESSAGE_ID --config ~/.config/crm-mail-sync/config.yaml
+crm-mail-sync skip    MESSAGE_ID --config ~/.config/crm-mail-sync/config.yaml
+```
+
+Approval re-fetches the live message and re-applies every privacy rule, so a private label added after queueing still wins. Approval only overrides keyword review. It never creates contacts: add an unknown person to HubSpot first, then approve.
+
+## Configuration
+
+All keys are top level. Unknown keys and malformed values fail before anything runs. Relative paths resolve against the config file's directory.
 
 | Key | Meaning |
 | --- | --- |
-| `mailbox_addresses` | Non-empty list of your mailbox addresses and sending aliases. Used for internal membership and sent direction. |
-| `internal_domains` | Non-empty list of company domains. Subdomains match too. |
-| `never_log` | List of exact addresses or domains, including subdomains, excluded from associations. Can be empty. |
-| `private_label` | Exact Gmail label name. Any occurrence on the message or another message in its thread is a hard skip. |
-| `review_keywords` | Case-insensitive subject/body words or phrases requiring review. Word boundaries avoid matching `board` inside `onboarding`. Can be empty. |
-| `state_path` | JSON outcome ledger and successful-run cursor. A neighbouring `.lock` file serialises writers. |
-| `review_path` | Append-only JSONL queue, including message snapshots and resolution events. |
-| `gmail_token_path` | Authorised-user OAuth token JSON, distinct from both state paths. |
-| `hubspot_token_env` | Token environment variable name. Default `HUBSPOT_TOKEN`. |
-| `hubspot_owner_id` | Optional numeric owner ID; `null` omits it. |
-| `initial_since` | Required initial UTC date in `YYYY-MM-DD` form. |
-
-## Rules and privacy
-
-Hard skips win: private labels, drafts/spam/trash, calendar subject prefixes or calendar MIME parts, and bulk senders. Malformed/incomplete messages go to review. Internal-only messages and threads containing only internal/never-log participants are skipped. Review keywords then take priority over eligible contact matches. An unknown external participant with a never-log participant goes to review; other unknown external mail also goes to review because the tool cannot safely choose a CRM record.
-
-Otherwise, eligible existing CRM contacts cause one email engagement. Never-log participants do not prevent logging to another eligible participant. Open deals exclude `closedwon`, `closedlost` and custom stages whose `hs_is_closed` property is true, then use the five most recently modified deals per contact. Shared associations are deduplicated.
-
-**Never Log controls association, not redaction.** The full logged message can still include an investor's name, address or quoted text. A private label is the hard exclusion mechanism. Keyword matching is deterministic and cannot understand intent or guarantee confidentiality. Attachments are not uploaded or classified; calendar parts are detected recursively. Review approval bypasses keyword review only: it re-fetches the live message, re-evaluates privacy exclusions and CRM contacts, and refuses unresolved ambiguity. Unknown people must become eligible CRM contacts before approval can log their message. Review approval never creates contacts.
-
-State files contain IDs and reasons; review files contain full email snapshots. Newly created files are mode `0600` and new parent directories `0700`. Protect existing directories, backups and scheduler logs too. The queue is append-only: skipping/approving does not erase its original snapshot. Set a retention policy outside this tool. Changing a rule does not replay previously recorded messages or remove emails already in HubSpot.
+| `mailbox_addresses` | Your mailbox address and sending aliases. Used for internal membership and sent direction. |
+| `internal_domains` | Your company's domains. Subdomains match too. |
+| `never_log` | Exact addresses or domains (subdomains included) that never get an email on their record. May be empty. |
+| `private_label` | Exact Gmail label name. On any message in a thread, it is a hard skip for the whole thread. |
+| `review_keywords` | Case-insensitive words or phrases that send a message to review. Matched on word boundaries, so `board` does not match `onboarding`. May be empty. |
+| `state_path` | JSON outcome ledger and run cursor. A neighbouring `.lock` file serialises writers. |
+| `review_path` | Append-only JSONL review queue, holding message snapshots and resolutions. |
+| `gmail_token_path` | Authorised-user OAuth token JSON. |
+| `hubspot_token_env` | Name of the environment variable holding the HubSpot token. Default `HUBSPOT_TOKEN`. |
+| `hubspot_owner_id` | Optional numeric HubSpot owner ID for logged emails, or `null`. |
+| `initial_since` | First-run start date, `YYYY-MM-DD` (UTC midnight). |
 
 ## Scheduling
 
-Run twice daily with cron, using absolute executable/config paths. Set `HUBSPOT_TOKEN` in the scheduler's securely supplied environment; cron does not inherit your interactive shell environment.
+Twice a day is plenty. Cron does not inherit your shell, so keep the token in a `0600` env file containing `export HUBSPOT_TOKEN=...` and source it, with absolute paths throughout:
 
 ```cron
-0 8,17 * * * /path/to/checkout/.venv/bin/crm-mail-sync run --config /private/config.yaml >> /private/crm-mail-sync.log 2>&1
+0 8,17 * * * . $HOME/.config/crm-mail-sync/env && $HOME/crm-mail-sync/.venv/bin/crm-mail-sync run --config $HOME/.config/crm-mail-sync/config.yaml >> $HOME/.config/crm-mail-sync/sync.log 2>&1
 ```
 
-The schedule follows the machine's local timezone. Exit status is non-zero on configuration, API or persistence failures. A per-state-file process lock prevents overlapping writes; use one state/queue pair per mailbox and CRM account. Read-only commands do not acquire a lock. Monitor failures and review the queue regularly.
+The exit status is non-zero on configuration, API or persistence failures, so alert on it. A per-state-file lock prevents overlapping runs. Use one config, state and queue per mailbox.
+
+## Privacy: what this does and does not protect
+
+- **Never-log controls association, not redaction.** A logged email still contains everything in it, including a never-log person's name, address and quoted text. If a thread must not reach the CRM at all, give it your private label.
+- **Keyword matching is literal.** It cannot understand intent. Treat it as a tripwire, not a guarantee.
+- **Attachments are never uploaded.** Calendar parts are detected recursively and skipped.
+- **The review queue holds full message snapshots.** New state and queue files are created `0600` in `0700` directories. Protect backups and scheduler logs too, and set your own retention policy: approving or skipping does not erase a snapshot.
+- **Rules are not retroactive.** Changing a rule does not replay old messages or remove emails already in HubSpot.
 
 ## Design notes
 
-- Pure rules operate on normalised dataclasses and supplied CRM lookups. `MailSource`, `Crm` and `ReviewSink` are structural interfaces; implement their methods to add another source, CRM or queue. Adapters and HTTP transports are independently testable without network access.
-- Successful runs checkpoint their start time. Subsequent reads overlap by 24 hours to catch ordinary delayed indexing; recorded message IDs suppress repeated work. `--since` overrides the fetch window, not the outcome ledger. Imports delayed by more than one day need an explicit earlier `--since`.
-- Each completed message is saved atomically; a failure never advances the run cursor. The queue is enqueued before the review outcome is saved, and repeated enqueue calls do not duplicate pending items. Review resolution can recover after the outcome is saved but before the terminal queue event is appended.
-- Before creation, HubSpot is searched for the exact subject within an inclusive two-minute window either side of the timestamp. This required heuristic can suppress unrelated same-subject emails. HubSpot search indexing and remote writes are not transactional: a crash or timeout after remote creation but before local save can require manual reconciliation before retrying. The adapter intentionally does not blindly retry writes or HTTP 429 responses.
-- Sent direction uses configured mailbox aliases or Gmail's `SENT` label. External contacts are matched by exact email search. Names are retained in normalisation and split into first name/remainder for HubSpot headers. Bodies are not silently truncated.
-- Gmail resolves labels across the whole current thread, even when the labelled message falls outside the fetch window. MIME traversal is recursive and text bodies stored as Gmail attachment data are fetched read-only. Unreadable content goes to review.
-- The fake CRM is intentionally in-memory. `approve` accepts `--source` and `--crm fake` for offline lifecycle testing; production approval defaults to Gmail and HubSpot. An isolated fake run is not proof of live permissions or account behaviour.
-- Dependencies are pinned in `pyproject.toml` and the complete development environment in `requirements.lock`. Regenerate with `uv pip compile pyproject.toml --extra dev --output-file requirements.lock`. The implementation is synchronous and uses the standard library for HubSpot HTTP; no framework or background service is needed.
-- Automatic learning from approvals, richer personal/social rules and queue integrations are future work. No rule is taught by approving a message in v1.
-- This checkout retains private fork provenance in `FORK.md` and historical reference material in `reference/`. Those are not shipped in the Python package. Before public release, remove the reference and private provenance and review Git history; the automated privacy test covers `src/`, `examples/`, `fixtures/` and this README, not historical commits.
+- `rules.py` is pure functions over normalised dataclasses. Mail, CRM and review queue sit behind small structural interfaces (`MailSource`, `Crm`, `ReviewSink`), so adding Outlook, another CRM or a Slack review queue means implementing a few methods.
+- Each run checkpoints its start time and re-reads 24 hours of overlap to catch late-indexed mail. Recorded message IDs make overlap harmless. `--since` widens the fetch window; it never replays recorded outcomes.
+- Each message is saved atomically and a failure never advances the cursor.
+- Before creating an email the tool searches HubSpot for the same subject within two minutes either side, in case HubSpot already logged it. This can suppress an unrelated email with an identical subject at the same moment.
+- HubSpot writes are not transactional. If a run crashes after HubSpot creates an email but before the local save, check HubSpot before rerunning. The adapter deliberately does not retry writes or HTTP 429s blindly.
+- Open deals exclude `closedwon`, `closedlost` and any custom stage with `hs_is_closed` true, then take the five most recently modified per contact.
 
-## Verification
+## Status and roadmap
 
-Tests cover every acceptance case plus MIME parsing, Gmail pagination/thread labels, HubSpot request payloads and pagination, closed custom deal stages, failed runs, locks, queue recovery and CLI lifecycle. They use injected services/transports and local fixtures. Real credentials and live account writes are deliberately outside offline acceptance.
+v0.1 is alpha. Every rule, adapter payload and CLI path is covered by offline tests against recorded API shapes; treat your first live runs as a dry-run-first rollout.
+
+Not yet built:
+
+- Learning from approvals ("always log threads with this partner domain").
+- Mail sources other than Gmail, CRMs other than HubSpot, review sinks other than a JSONL file.
+- Retry with backoff for HubSpot rate limits.
+
+Issues and pull requests welcome.
+
+## Licence
+
+[MIT](LICENSE)
