@@ -63,10 +63,19 @@ def normalise(raw: dict, label_names: dict[str, str], thread_labels: tuple[str, 
                     mime_headers['content-type'] = header['value']
             charset = mime_headers.get_content_charset() or charset
             try:
-                content = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4)).decode(charset)
-            except (ValueError, UnicodeError, LookupError):
+                body_bytes = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4))
+            except (ValueError, UnicodeError):
                 content = ''
                 incomplete = True
+            else:
+                # Gmail can supply UTF-8 despite a legacy MIME charset declaration.
+                try:
+                    content = body_bytes.decode('utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        content = body_bytes.decode(charset)
+                    except (UnicodeError, LookupError):
+                        content = body_bytes.decode('utf-8', errors='replace')
             (text if mime == 'text/plain' else html).append(content)
         for child in part.get('parts', []):
             walk(child)

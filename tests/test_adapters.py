@@ -216,3 +216,43 @@ def test_hubspot_retries_rate_limited_reads_but_never_creates(monkeypatch):
     with pytest.raises(RuntimeError, match='429'):
         crm.request('POST', '/crm/v3/objects/emails', {'properties': {}})
     assert len(calls) == 1, 'a create must never be retried blindly'
+
+
+@pytest.fixture
+def mismatched_charset_message():
+    raw = raw_message()
+    raw['payload']['headers'] = [
+        {'name': 'From', 'value': 'sender@example.com'},
+        {'name': 'To', 'value': 'operator@example.com'},
+    ]
+    raw['payload']['parts'] = [{
+        'mimeType': 'text/plain',
+        'headers': [{'name': 'Content-Type', 'value': 'text/plain; charset=windows-1252'}],
+        'body': {'data': encoded('“Hello José” — £25')},
+    }]
+    return raw
+
+
+@pytest.mark.parametrize('charset', ['windows-1252', 'iso-8859-1', 'unknown-charset'])
+def test_gmail_prefers_utf8_over_declared_charset(mismatched_charset_message, charset):
+    raw = mismatched_charset_message
+    raw['payload']['parts'][0]['headers'][0]['value'] = f'text/plain; charset={charset}'
+    message = normalise(raw, {}, ())
+    assert message.text == '“Hello José” — £25'
+    assert not message.incomplete
+
+
+@pytest.mark.parametrize('charset,body,expected', [
+    ('windows-1252', '“Hello José” — £25'.encode('windows-1252'), '“Hello José” — £25'),
+    ('iso-8859-1', 'José £25'.encode('iso-8859-1'), 'José £25'),
+    ('unknown-charset', b'Hello \xff', 'Hello �'),
+    ('ascii', b'Hello \xff', 'Hello �'),
+])
+def test_gmail_charset_fallbacks(mismatched_charset_message, charset, body, expected):
+    raw = mismatched_charset_message
+    part = raw['payload']['parts'][0]
+    part['headers'][0]['value'] = f'text/plain; charset={charset}'
+    part['body']['data'] = base64.urlsafe_b64encode(body).decode()
+    message = normalise(raw, {}, ())
+    assert message.text == expected
+    assert not message.incomplete
