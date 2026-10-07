@@ -234,7 +234,6 @@ Not yet built:
 
 - Learning from approvals ("always log threads with this partner domain").
 - Mail sources other than Gmail, CRMs other than HubSpot, review sinks other than a JSONL file.
-- Retry with backoff for HubSpot rate limits.
 
 Issues and pull requests welcome.
 
