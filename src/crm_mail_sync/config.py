@@ -9,6 +9,13 @@ EMAIL = re.compile(r"[^\s@]+@(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}", r
 DOMAIN = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}", re.I)
 
 
+DEFAULT_AUTOMATED_SENDER_PATTERNS = (
+    "noreply*@*", "no[-_.]reply*@*", "donotreply*@*", "do[-_.]not[-_.]reply*@*",
+    "notification@*", "notifications*@*", "mailer-daemon*@*", "drive-shares*@*",
+    "*docusign*@*", "*echosign*@*", "*@*docusign*", "*@*echosign*",
+)
+
+
 @dataclass(frozen=True)
 class Config:
     mailbox_addresses: tuple[str, ...]
@@ -22,6 +29,8 @@ class Config:
     hubspot_token_env: str = "HUBSPOT_TOKEN"
     hubspot_owner_id: str | None = None
     initial_since: str = ""
+    skip_automated_senders: bool = True
+    automated_sender_patterns: tuple[str, ...] = DEFAULT_AUTOMATED_SENDER_PATTERNS
 
 
 def load_config(path: str | Path) -> Config:
@@ -32,7 +41,10 @@ def load_config(path: str | Path) -> Config:
     unknown = set(data) - set(Config.__dataclass_fields__)
     if unknown:
         raise ValueError(f"Unknown config keys: {', '.join(sorted(unknown))}")
-    for key in ("mailbox_addresses", "internal_domains", "never_log", "review_keywords"):
+    data.setdefault("automated_sender_patterns", list(DEFAULT_AUTOMATED_SENDER_PATTERNS))
+    if not isinstance(data.get("skip_automated_senders", True), bool):
+        raise ValueError("skip_automated_senders must be a boolean")
+    for key in ("automated_sender_patterns", "mailbox_addresses", "internal_domains", "never_log", "review_keywords"):
         value = data.get(key)
         if not isinstance(value, list) or any(not isinstance(x, str) or not x.strip() for x in value):
             raise ValueError(f"{key} must be a list of non-empty strings")

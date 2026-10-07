@@ -88,3 +88,35 @@ def test_status_reports_queue_and_counts_without_writing(tmp_path, capsys):
 
     assert main(['status', '--config', str(config)]) == 0
     assert capsys.readouterr().out.startswith('last run: ')
+
+
+def test_automated_sender_config_defaults_and_overrides(tmp_path):
+    path = configured(tmp_path)
+    data = yaml.safe_load(path.read_text())
+    data.pop('automated_sender_patterns', None)
+    data.pop('skip_automated_senders', None)
+    path.write_text(yaml.safe_dump(data))
+    config = load_config(path)
+    assert config.skip_automated_senders is True
+    assert 'drive-shares*@*' in config.automated_sender_patterns
+    data.update(automated_sender_patterns=[' CUSTOM-*@EXAMPLE.COM '], skip_automated_senders=False)
+    path.write_text(yaml.safe_dump(data))
+    config = load_config(path)
+    assert config.automated_sender_patterns == ('custom-*@example.com',)
+    assert config.skip_automated_senders is False
+    data['automated_sender_patterns'] = []
+    path.write_text(yaml.safe_dump(data))
+    assert load_config(path).automated_sender_patterns == ()
+
+
+def test_automated_sender_config_rejects_invalid_values(tmp_path):
+    import pytest
+    path = configured(tmp_path)
+    original = yaml.safe_load(path.read_text())
+    for key, value in [('automated_sender_patterns', 'noreply*'),
+                       ('automated_sender_patterns', ['']),
+                       ('automated_sender_patterns', [1]),
+                       ('skip_automated_senders', 'false')]:
+        path.write_text(yaml.safe_dump(dict(original, **{key: value})))
+        with pytest.raises(ValueError, match=key):
+            load_config(path)

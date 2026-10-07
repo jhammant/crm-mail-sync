@@ -1,6 +1,22 @@
 mailbox_addresses: [operator@example.com]
 internal_domains: [example.com]
 never_log: [investor@example.org]
+# Case-insensitive shell globs against the full sender address; replaces defaults.
+# [] disables address matching; false disables both address and header skips.
+skip_automated_senders: true
+automated_sender_patterns:
+  - 'noreply*@*'
+  - 'no[-_.]reply*@*'
+  - 'donotreply*@*'
+  - 'do[-_.]not[-_.]reply*@*'
+  - 'notification@*'
+  - 'notifications*@*'
+  - 'mailer-daemon*@*'
+  - 'drive-shares*@*'
+  - '*docusign*@*'
+  - '*echosign*@*'
+  - '*@*docusign*'
+  - '*@*echosign*'
 private_label: Private - no CRM
 # Avoid words found in email disclaimers (confidential, privileged): quoted replies carry them.
 review_keywords: [term sheet, investment, board meeting, salary, strictly confidential]

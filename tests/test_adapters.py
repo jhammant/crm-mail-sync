@@ -256,3 +256,24 @@ def test_gmail_charset_fallbacks(mismatched_charset_message, charset, body, expe
     message = normalise(raw, {}, ())
     assert message.text == expected
     assert not message.incomplete
+
+
+@pytest.mark.parametrize('name,value,skip', [
+    ('Auto-Submitted', 'auto-generated', True),
+    ('Auto-Submitted', ' NO ', False),
+    ('List-Unsubscribe', '<mailto:leave@example.com>', True),
+    ('Precedence', ' BULK ', True),
+    ('Precedence', 'first-class', False),
+])
+def test_automated_headers_skip_before_crm(config, name, value, skip):
+    raw = raw_message()
+    raw['payload']['parts'] = [{'mimeType': 'text/plain', 'body': {'data': encoded('Hello')}}]
+    raw['payload']['headers'].append({'name': name, 'value': value})
+    crm = Mock()
+    outcome = evaluate(normalise(raw, {}, ()), config, crm)
+    if skip:
+        assert (outcome.decision.action, outcome.decision.reason) == ('skip', 'automated sender')
+        crm.contact.assert_not_called()
+    else:
+        assert outcome.decision.reason != 'automated sender'
+        crm.contact.assert_called()

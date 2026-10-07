@@ -41,7 +41,7 @@ crm-mail-sync run --config examples/config.example.yaml \
 2026-10-02T09:04:00+00:00 sent skip private-thread: private label
 2026-10-02T09:05:00+00:00 sent skip calendar-subject: calendar robot
 2026-10-02T09:06:00+00:00 sent skip calendar-part: calendar robot
-2026-10-02T09:07:00+00:00 received skip bulk: bulk sender
+2026-10-02T09:07:00+00:00 received skip bulk: automated sender
 2026-10-02T09:08:00+00:00 sent review unknown-with-investor: unknown external participants with never-log participant
 2026-10-02T09:09:00+00:00 sent review keyword: review keyword: term sheet
 2026-10-02T09:10:00+00:00 sent skip already-logged: already in CRM (subject within 2 minutes)
@@ -61,7 +61,7 @@ Rules run in this order. The first match wins.
 | 1 | Message or any message in its thread carries your private label | skip |
 | 2 | Draft, spam or trash | skip |
 | 3 | Calendar robot (`Accepted:`, `Invitation:` and similar, or a `text/calendar` part) | skip |
-| 4 | Bulk or list mail: a `no-reply`, `notifications` or `mailer-daemon` sender, or a `List-Id`, `List-Unsubscribe`, `Precedence: bulk` or `Auto-Submitted` header | skip |
+| 4 | Automated sender matching configured patterns or list/automation headers (when enabled) | skip |
 | 5 | Malformed or unreadable message | review |
 | 6 | Only internal participants | skip |
 | 7 | Only internal and never-log participants | skip |
@@ -182,6 +182,8 @@ All keys are top level. Unknown keys and malformed values fail before anything r
 | `mailbox_addresses` | Your mailbox address and sending aliases. Used for internal membership and sent direction. |
 | `internal_domains` | Your company's domains. Subdomains match too. |
 | `never_log` | Exact addresses or domains (subdomains included) that never get an email on their record. May be empty. |
+| `skip_automated_senders` | Default `true`: skip automated addresses and list/automation headers with reason `automated sender`. Set `false` to disable both checks. Headers: `List-Id`, `List-Unsubscribe`, `Precedence: bulk/list/junk`, or `Auto-Submitted` other than `no` (case-insensitive). |
+| `automated_sender_patterns` | Case-insensitive shell globs matched against the entire sender address (`*`, `?`, `[abc]`). Replaces the default list shown in the example config: no-reply variants, notifications, mailer-daemon, drive-shares, and docusign/echosign-style local parts or domains. For example, `['alerts@example.com', 'robot-*@example.com']`. `[]` disables address matching but preserves header checks. |
 | `private_label` | Exact Gmail label name. On any message in a thread, it is a hard skip for the whole thread. |
 | `review_keywords` | Case-insensitive words or phrases that send a message to review. Matched on word boundaries, so `board` does not match `onboarding`. Quoted replies are matched too, so avoid words found in email disclaimers such as `confidential` or `privileged`: on a real mailbox they sent every reply to a disclaimer-carrying sender to review. May be empty. |
 | `state_path` | JSON outcome ledger and run cursor. A neighbouring `.lock` file serialises writers. |
