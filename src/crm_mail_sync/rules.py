@@ -39,6 +39,9 @@ def hard_skip(message: Message, config: Config) -> str | None:
         fnmatchcase(message.sender.email, pattern.lower()) for pattern in config.automated_sender_patterns
     )):
         return "automated sender"
+    if (message.sender.email not in config.mailbox_addresses and 'SENT' not in message.labels
+            and not any(p.email in config.mailbox_addresses for p in (*message.to, *message.cc))):
+        return "mailbox owner only bcc'd"
     return None
 
 

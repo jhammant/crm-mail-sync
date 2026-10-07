@@ -62,13 +62,16 @@ Rules run in this order. The first match wins.
 | 2 | Draft, spam or trash | skip |
 | 3 | Calendar robot (`Accepted:`, `Invitation:` and similar, or a `text/calendar` part) | skip |
 | 4 | Automated sender matching configured patterns or list/automation headers (when enabled) | skip |
-| 5 | Malformed or unreadable message | review |
-| 6 | Only internal participants | skip |
-| 7 | Only internal and never-log participants | skip |
-| 8 | Subject or body matches a review keyword (`term sheet`, `salary`, ...) | review |
-| 9 | At least one external participant is an existing HubSpot contact not on never-log | **log** |
-| 10 | Unknown external people alongside a never-log person | review |
-| 11 | Anything else | review |
+| 5 | Received mail with no mailbox address or alias in To/Cc | skip (`mailbox owner only bcc'd`) |
+| 6 | Malformed or unreadable message | review |
+| 7 | Only internal participants | skip |
+| 8 | Only internal and never-log participants | skip |
+| 9 | Subject or body matches a review keyword (`term sheet`, `salary`, ...) | review |
+| 10 | At least one external participant is an existing HubSpot contact not on never-log | **log** |
+| 11 | Unknown external people alongside a never-log person | review |
+| 12 | Anything else | review |
+
+BCC-only is inferred from the absence of a configured mailbox address in To/Cc; Gmail need not expose a Bcc header. Messages sent by a configured mailbox alias or labelled `SENT` are exempt. This skip happens before incomplete-message or keyword review, and approval cannot override it.
 
 Never-log people never get an email on their record, and their presence never stops logging for other people on the same message.
 
@@ -84,7 +87,7 @@ python3 -m venv .venv
 .venv/bin/pip install --no-deps -e .
 source .venv/bin/activate
 
-python -m pytest -q        # 70 tests, fully offline
+python -m pytest -q        # fully offline
 crm-mail-sync run --config examples/config.example.yaml \
   --source fixtures/sample-mailbox.json --crm fake --dry-run
 ```
@@ -179,7 +182,7 @@ All keys are top level. Unknown keys and malformed values fail before anything r
 
 | Key | Meaning |
 | --- | --- |
-| `mailbox_addresses` | Your mailbox address and sending aliases. Used for internal membership and sent direction. |
+| `mailbox_addresses` | Your mailbox address and sending aliases. Used for internal membership, sent direction and detecting BCC-only received mail. Include every receiving alias to avoid skipping mail addressed to an alias. |
 | `internal_domains` | Your company's domains. Subdomains match too. |
 | `never_log` | Exact addresses or domains (subdomains included) that never get an email on their record. May be empty. |
 | `skip_automated_senders` | Default `true`: skip automated addresses and list/automation headers with reason `automated sender`. Set `false` to disable both checks. Headers: `List-Id`, `List-Unsubscribe`, `Precedence: bulk/list/junk`, or `Auto-Submitted` other than `no` (case-insensitive). |

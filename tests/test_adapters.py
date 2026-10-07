@@ -277,3 +277,16 @@ def test_automated_headers_skip_before_crm(config, name, value, skip):
     else:
         assert outcome.decision.reason != 'automated sender'
         crm.contact.assert_called()
+
+
+def test_gmail_without_visible_recipients_skips_as_bcc(config):
+    raw = raw_message()
+    raw['labelIds'] = ['INBOX']
+    raw['payload']['headers'] = [{'name': 'From', 'value': 'host@example.com'}]
+    raw['payload']['parts'] = [{'mimeType': 'text/plain', 'body': {'data': encoded('Event details')}}]
+    message = normalise(raw, {}, ())
+    assert message.incomplete  # Missing recipients remains an adapter-level fact.
+    crm = Mock()
+    outcome = evaluate(message, config, crm)
+    assert (outcome.decision.action, outcome.decision.reason) == ('skip', "mailbox owner only bcc'd")
+    crm.contact.assert_not_called()

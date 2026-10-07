@@ -96,3 +96,29 @@ def test_automated_sender_skip_can_be_disabled(config, source, crm):
     config = replace(config, skip_automated_senders=False)
     message = replace(source.get_message('intro'), sender=Address('noreply@example.com'), mailing_list=True)
     assert classify(message, config, crm.contacts).reason != 'automated sender'
+
+
+@pytest.mark.parametrize('recipients', [(), (Address('event@example.com'),)])
+@pytest.mark.parametrize('incomplete', [False, True])
+def test_bcc_only_skips_before_review_and_crm(config, source, recipients, incomplete):
+    from unittest.mock import Mock
+    from crm_mail_sync.pipeline import evaluate
+    message = replace(source.get_message('intro'), sender=Address('host@example.com'),
+                      to=recipients, cc=(), incomplete=incomplete, subject='term sheet', labels=())
+    crm = Mock()
+    outcome = evaluate(message, config, crm, approved=True)
+    assert (outcome.decision.action, outcome.decision.reason) == ('skip', "mailbox owner only bcc'd")
+    crm.contact.assert_not_called()
+
+
+@pytest.mark.parametrize('placement', ['to', 'cc', 'sender', 'sent-label'])
+def test_visible_owner_alias_or_sent_message_is_not_bcc_only(config, source, crm, placement):
+    config = replace(config, mailbox_addresses=(*config.mailbox_addresses, 'alias@example.com'))
+    message = replace(source.get_message('intro'), sender=Address('host@example.com'), to=(), cc=(), labels=())
+    if placement in {'to', 'cc'}:
+        message = replace(message, **{placement: (Address('ALIAS@example.com'),)})
+    elif placement == 'sender':
+        message = replace(message, sender=Address('alias@example.com'), to=(Address('guest@example.com'),))
+    else:
+        message = replace(message, labels=('SENT',), to=(Address('guest@example.com'),))
+    assert classify(message, config, crm.contacts).reason != "mailbox owner only bcc'd"
