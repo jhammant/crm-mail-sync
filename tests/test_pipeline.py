@@ -153,7 +153,8 @@ def test_recheck_skips_what_was_learned_as_skip(config, source, crm, review):
     run(config, source, crm, review)
     learn(config.learned_rules_path, 'skip', ['example.org'], config.personal_email_domains)
     recheck(config, source, crm, review)
-    assert set(review.pending()) == {'incomplete'}
+    # The keyword email is with an existing contact, so the skip doesn't apply and it stays held.
+    assert set(review.pending()) == {'incomplete', 'keyword'}
     assert len(crm.created) == 1 and not crm.created_contacts
 
 

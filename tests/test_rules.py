@@ -146,9 +146,12 @@ def test_learned_log_never_creates_a_never_log_contact(config, source, crm):
     assert all(c.email != 'investor@example.org' for c in decision.contacts)
 
 
-def test_learned_skip_wins_even_over_an_existing_contact(config, source, crm):
-    decision = classify(source.get_message('intro'), config, crm.contacts, learned=LearnedRules(skip=('example.org',)))
-    assert (decision.action, decision.reason) == ('skip', 'learned rule: skip example.org')
+def test_learned_skip_never_stops_an_existing_contact(config, source, crm):
+    skip = LearnedRules(skip=('example.org',))
+    intro = classify(source.get_message('intro'), config, crm.contacts, learned=skip)
+    unknown = classify(source.get_message('unknown'), config, crm.contacts, learned=skip)
+    assert (intro.action, intro.reason) == ('log', 'existing eligible contacts')
+    assert (unknown.action, unknown.reason) == ('skip', 'learned rule: skip example.org')
 
 
 def test_learned_rules_leave_hard_skips_alone(config, source, crm):

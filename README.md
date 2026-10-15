@@ -66,7 +66,7 @@ Rules run in this order. The first match wins.
 | 6 | Malformed or unreadable message | review |
 | 7 | Only internal participants | skip |
 | 8 | Only internal and never-log participants | skip |
-| 9 | Every other external participant has a learned `skip` rule | skip (`learned rule: skip ...`) |
+| 9 | Every other external participant has a learned `skip` rule and isn't a HubSpot contact | skip (`learned rule: skip ...`) |
 | 10 | Subject or body matches a review keyword (`term sheet`, `salary`, ...), unless someone on it has a learned `log` rule | review |
 | 11 | Someone on it has a learned `log` rule | **log**, adding them to HubSpot if they aren't there yet |
 | 12 | At least one external participant is an existing HubSpot contact not on never-log | **log** |
@@ -75,7 +75,7 @@ Rules run in this order. The first match wins.
 
 BCC-only is inferred from the absence of a configured mailbox address in To/Cc; Gmail need not expose a Bcc header. Messages sent by a configured mailbox alias or labelled `SENT` are exempt. This skip happens before incomplete-message or keyword review, and approval cannot override it.
 
-Never-log people never get an email on their record, and their presence never stops logging for other people on the same message. A learned `skip` drops a person the same way, without sending mixed threads to review.
+Never-log people never get an email on their record, and their presence never stops logging for other people on the same message. A learned `skip` drops a person the same way, without sending mixed threads to review, but never applies to someone who is already a HubSpot contact: it means "not worth adding, stop asking". To stop logging an existing contact, put them in `never_log`.
 
 Learned rules come from your review decisions (see [Work the review queue](#4-work-the-review-queue)). A learned `log` is a standing approval, so it covers keyword holds too: keep anyone whose mail must always be seen first off the `log` list.
 

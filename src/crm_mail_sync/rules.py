@@ -81,7 +81,8 @@ def classify(message: Message, config: Config, contacts: Mapping[str, Contact | 
     eligible = eligible_addresses(message, config)
     if not eligible:
         return Decision("skip", "only never-log/internal participants")
-    wanted = tuple(a for a in eligible if learned.action_for(a) != "skip")
+    # A learned skip means "not worth adding, stop asking": it never stops logging an existing contact.
+    wanted = tuple(a for a in eligible if learned.action_for(a) != "skip" or contacts.get(a))
     if not wanted:
         skipped = ", ".join(sorted({party(a, config.personal_email_domains) for a in eligible}))
         return Decision("skip", f"learned rule: skip {skipped}")

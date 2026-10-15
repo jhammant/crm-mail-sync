@@ -13,7 +13,8 @@ HEADER = """\
 # start asking again, or move it between lists. Each entry is an address or a domain.
 # An address beats a domain, and for the same entry skip beats log.
 #   log:  log their email to the CRM, creating the contact if they aren't in it yet
-#   skip: never log their email, and stop asking
+#   skip: don't log their email or ask about it; anyone already in the CRM keeps logging
+#         (put them in never_log in the config to stop that)
 """
 
 
