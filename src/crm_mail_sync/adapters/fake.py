@@ -10,6 +10,8 @@ class FakeCrm:
                                        closed=d.get('closed', False)) for d in rows]
                               for cid, rows in data.get('deals', {}).items()}
         self.companies = data.get('companies', [])
+        self.company_domains = data.get('company_domains', {})
+        self.created_contacts: list[Contact] = []
         self.emails = list(data.get('emails', []))
         self.created: list[dict] = []
 
@@ -31,3 +33,13 @@ class FakeCrm:
         self.emails.append(record)
         self.created.append(record)
         return record['id']
+
+    def create_contact(self, email: str, name: str = '', company_domain: str | None = None) -> Contact:
+        email = email.lower()
+        if email in self.contacts:
+            return self.contacts[email]
+        contact = Contact(f'new-{len(self.created_contacts) + 1}', email,
+                          self.company_domains.get(company_domain) if company_domain else None)
+        self.contacts[email] = contact
+        self.created_contacts.append(contact)
+        return contact

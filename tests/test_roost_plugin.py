@@ -48,17 +48,25 @@ def test_queue_badges_and_actions_resolve_items(plugin_env):
     assert main(['run', '--config', plugin_env['CRM_MAIL_SYNC_CONFIG'], '--source', str(FIXTURE), '--crm', 'fake']) == 0
     menu = json.loads(plugin(plugin_env).stdout)
     assert menu['badge'] == {'text': '4', 'level': 'warn'}
-    entries = {item['title']: item for item in menu['items'] if 'items' in item}
-    keyword = [a['title'] for a in entries['Project term sheet']['items']]
-    assert 'Log to HubSpot…' in keyword and 'Skip (never log it)' in keyword
-    approve = next(a for a in entries['Project term sheet']['items'] if a['title'] == 'Log to HubSpot…')
-    assert approve['confirm'].startswith('Log "Project term sheet" to HubSpot?')
-    assert not any(a.get('run', [''])[-2:-1] == ['approve'] for a in entries['incomplete']['items']), \
-        'an unreadable message can never be approved, so it is not offered'
+    assert any(i['title'] == '4 emails waiting for review from 1 company or person' for i in menu['items'])
+    group = next(item for item in menu['items'] if item['title'] == 'example.org · 4 emails')
+    actions = {a['title']: a for a in group['items']}
+    assert actions['Log all and remember…']['run'][-2:] == ['log-group', 'example.org']
+    assert 'log future mail with example.org automatically' in actions['Log all and remember…']['confirm']
+    assert actions['Skip all and remember']['run'][-2:] == ['skip-group', 'example.org']
+    emails = {e['title']: [a['title'] for a in e['items']] for e in actions['One by one']['items']}
+    assert 'Log just this one…' in emails['Project term sheet'] and 'Skip just this one' in emails['Project term sheet']
+    assert 'Log just this one…' not in emails['incomplete'], 'an unreadable message can never be approved'
 
     skipped = plugin(plugin_env, 'skip', 'keyword')
     assert (skipped.returncode, skipped.stdout.strip()) == (0, 'keyword: skipped')
     refused = plugin(plugin_env, 'approve', 'incomplete')
     assert refused.returncode == 1 and 'Cannot approve safely' in refused.stdout
     assert json.loads(plugin(plugin_env).stdout)['badge'] == {'text': '3', 'level': 'warn'}
-    assert plugin(plugin_env, 'dry-run').stdout.strip() == 'dry-run: 0 message(s); log=0 skip=0 review=0'
+
+    logged = plugin(plugin_env, 'log-group', 'example.org')
+    assert (logged.returncode, logged.stdout.strip()) == (0, 'recheck: 3 pending; log=2 skip=0 still review=1')
+    assert json.loads(plugin(plugin_env).stdout)['badge'] == {'text': '1', 'level': 'warn'}
+    refused = plugin(plugin_env, 'log-group', 'gmail.com')
+    assert refused.returncode == 1 and 'personal email domain' in refused.stdout
+    assert plugin(plugin_env, 'dry-run').stdout.strip() == 'dry-run: 0 message(s); log=0 skip=0 review=0; queue: 0 decided, 1 waiting'

@@ -66,14 +66,18 @@ Rules run in this order. The first match wins.
 | 6 | Malformed or unreadable message | review |
 | 7 | Only internal participants | skip |
 | 8 | Only internal and never-log participants | skip |
-| 9 | Subject or body matches a review keyword (`term sheet`, `salary`, ...) | review |
-| 10 | At least one external participant is an existing HubSpot contact not on never-log | **log** |
-| 11 | Unknown external people alongside a never-log person | review |
-| 12 | Anything else | review |
+| 9 | Every other external participant has a learned `skip` rule | skip (`learned rule: skip ...`) |
+| 10 | Subject or body matches a review keyword (`term sheet`, `salary`, ...), unless someone on it has a learned `log` rule | review |
+| 11 | Someone on it has a learned `log` rule | **log**, adding them to HubSpot if they aren't there yet |
+| 12 | At least one external participant is an existing HubSpot contact not on never-log | **log** |
+| 13 | Unknown external people alongside a never-log person | review |
+| 14 | Anything else | review |
 
 BCC-only is inferred from the absence of a configured mailbox address in To/Cc; Gmail need not expose a Bcc header. Messages sent by a configured mailbox alias or labelled `SENT` are exempt. This skip happens before incomplete-message or keyword review, and approval cannot override it.
 
-Never-log people never get an email on their record, and their presence never stops logging for other people on the same message.
+Never-log people never get an email on their record, and their presence never stops logging for other people on the same message. A learned `skip` drops a person the same way, without sending mixed threads to review.
+
+Learned rules come from your review decisions (see [Work the review queue](#4-work-the-review-queue)). A learned `log` is a standing approval, so it covers keyword holds too: keep anyone whose mail must always be seen first off the `log` list.
 
 ## Install
 
@@ -155,19 +159,45 @@ A live dry-run reads Gmail and searches HubSpot but writes nothing: no CRM recor
 
 ### 4. Work the review queue
 
+The queue groups by who each email is with: one row per company domain, or per person on a personal address such as gmail.com. One decision clears the whole group and is remembered, so mail from them never comes back to you.
+
 ```bash
-crm-mail-sync review  --config ~/.config/crm-mail-sync/config.yaml   # list pending items
-crm-mail-sync approve MESSAGE_ID --config ~/.config/crm-mail-sync/config.yaml
-crm-mail-sync skip    MESSAGE_ID --config ~/.config/crm-mail-sync/config.yaml
+C=~/.config/crm-mail-sync/config.yaml
+crm-mail-sync groups  --config $C                   # pending emails, one line per company or person
+crm-mail-sync learn log  partner.example.org --config $C   # log their mail from now on, adding new people to HubSpot
+crm-mail-sync learn skip newsletters.example.com --config $C
+crm-mail-sync recheck --dry-run --config $C         # what the rules would now decide; writes nothing
+crm-mail-sync recheck --config $C                   # log or skip every pending email the rules now decide
 ```
 
-Approval re-fetches the live message and re-applies every privacy rule, so a private label added after queueing still wins. Approval only overrides keyword review. It never creates contacts: add an unknown person to HubSpot first, then approve.
+Every `run` also rechecks the queue, so an email waiting there is decided as soon as a learned rule, or a contact someone added to HubSpot, can decide it.
 
-`crm-mail-sync status --config ... --json` prints the last run, outcome counts and pending items as JSON for dashboards and other integrations. It reads only, takes no lock and writes nothing.
+Or decide one email at a time, with `--remember` to learn from it:
+
+```bash
+crm-mail-sync review  --config $C                           # list pending items
+crm-mail-sync approve MESSAGE_ID --remember --config $C     # log it, and log future mail with these people
+crm-mail-sync skip    MESSAGE_ID --config $C                # skip just this one
+```
+
+Approval re-fetches the live message and re-applies every privacy rule, so a private label added after queueing still wins, and never-log people are never added or linked. Approving an email with people who aren't in HubSpot yet creates them as contacts, linked to the company whose domain matches theirs when exactly one does.
+
+Decisions live in `learned.yaml` next to your config (see `learned_rules_path`). It's plain YAML: read it, delete an entry to start being asked again, or move it between lists.
+
+```yaml
+log:
+  - match: partner.example.org   # a domain covers its subdomains
+    added: '2026-10-15'
+skip:
+  - match: pat@example.com       # an address; on a personal domain such as gmail.com, always an address
+    added: '2026-10-15'
+```
+
+An address beats a domain, and for the same entry `skip` beats `log`. `crm-mail-sync groups --json` and `status --json` print the queue for dashboards and other integrations; both read only and write nothing.
 
 ### 5. Optional: the review queue in your menu bar
 
-[Roost](https://github.com/jhammant/roost) can show the queue in the macOS menu bar: a badge with the number of emails waiting, and per email *Open in Gmail*, *Log to HubSpot…* (with a confirmation) and *Skip*. The plugin ships in [`integrations/roost/`](integrations/roost/):
+[Roost](https://github.com/jhammant/roost) can show the queue in the macOS menu bar: a badge with the number of emails waiting, one row per company or person with *Log all and remember…* (with a confirmation) and *Skip all and remember*, and the emails one by one underneath with *Open in Gmail*, *Log just this one…* and *Skip just this one*. The plugin ships in [`integrations/roost/`](integrations/roost/):
 
 ```bash
 ln -s "$PWD/.venv/bin/crm-mail-sync" ~/.local/bin/crm-mail-sync   # Roost needs it on the PATH
@@ -195,6 +225,8 @@ All keys are top level. Unknown keys and malformed values fail before anything r
 | `hubspot_token_env` | Name of the environment variable holding the HubSpot token. Default `HUBSPOT_TOKEN`. |
 | `hubspot_owner_id` | Optional numeric HubSpot owner ID for logged emails, or `null`. |
 | `initial_since` | First-run start date, `YYYY-MM-DD` (UTC midnight). |
+| `learned_rules_path` | Learned `log`/`skip` rules from your review decisions. Default `learned.yaml` next to the config; created on the first decision. |
+| `personal_email_domains` | Domains where decisions are remembered per address, never for the whole domain. Replaces the default list (gmail.com, outlook.com, icloud.com and other common personal domains). |
 
 ## Scheduling
 
@@ -226,13 +258,14 @@ The exit status is non-zero on configuration, API or persistence failures, so al
 
 ## Status and roadmap
 
-v0.1 is alpha. Every rule, adapter payload and CLI path is covered by offline tests, and it has been dry-run against a real Google Workspace mailbox and HubSpot portal (88 messages: no errors, nothing written, and every email HubSpot had already logged itself was recognised and not duplicated). Still roll out dry-run first: your mail will differ.
+v0.2 is alpha. Every rule, adapter payload and CLI path is covered by offline tests, and it has been dry-run against a real Google Workspace mailbox and HubSpot portal (88 messages: no errors, nothing written, and every email HubSpot had already logged itself was recognised and not duplicated). Still roll out dry-run first: your mail will differ.
 
 Live testing changed three things before release: rate-limit backoff for Gmail and HubSpot reads, list and bulk headers as a skip rule, and dropping `confidential` from the suggested keywords.
 
+v0.2 learns from review decisions: the queue groups by company, one decision covers every email with them, and future mail follows it. Approving someone who isn't in HubSpot now adds them.
+
 Not yet built:
 
-- Learning from approvals ("always log threads with this partner domain").
 - Mail sources other than Gmail, CRMs other than HubSpot, review sinks other than a JSONL file.
 
 Issues and pull requests welcome.

@@ -5,7 +5,8 @@ import json
 import pytest
 
 from crm_mail_sync.models import timestamp
-from crm_mail_sync.pipeline import evaluate, resolve_review, run
+from crm_mail_sync.learned import learn
+from crm_mail_sync.pipeline import evaluate, recheck, resolve_review, review_groups, run
 from crm_mail_sync.state import State, run_lock
 
 
@@ -53,8 +54,11 @@ def test_approval_and_skip(config, source, crm, review):
     assert 'unknown' not in review.pending()
     with pytest.raises(ValueError, match='No pending'):
         resolve_review(config, source, crm, review, 'keyword', approve=True)
-    with pytest.raises(ValueError, match='Cannot approve safely'):
-        resolve_review(config, source, crm, review, 'unknown-with-investor', approve=True)
+    # Approving people who aren't in the CRM creates them; a never-log contact is never created or linked.
+    outcome = resolve_review(config, source, crm, review, 'unknown-with-investor', approve=True)
+    assert [c.email for c in crm.created_contacts] == ['unknown@example.org']
+    assert [c.email for c in outcome.associations.contacts] == []
+    assert [c.email for c in crm.created[-1]['associations'].contacts] == ['unknown@example.org']
 
 
 def test_approval_refreshes_private_label(config, source, crm, review, monkeypatch):
@@ -105,3 +109,58 @@ def test_review_resolution_recovers_after_state_write(config, source, crm, revie
     assert resolve_review(config, source, crm, review, 'keyword', approve=True) is None
     assert not review.pending()
     assert not crm.created
+
+
+def test_learned_log_creates_the_contact_then_logs(config, source, crm, review):
+    # Arrange
+    crm.company_domains = {'example.org': 'company-partner'}
+    learn(config.learned_rules_path, 'log', ['example.org'], config.personal_email_domains)
+    # Act
+    run(config, source, crm, review)
+    # Assert
+    assert [c.email for c in crm.created_contacts] == ['unknown@example.org']
+    logged = {r['message'].id: r for r in crm.created}
+    assert set(logged) == {'intro', 'keyword', 'unknown', 'unknown-with-investor'}
+    assert [c.email for c in logged['unknown']['associations'].contacts] == ['unknown@example.org']
+    assert logged['unknown']['associations'].companies == ('company-partner',)
+    assert set(review.pending()) == {'incomplete'}
+
+
+def test_dry_run_with_learned_rules_creates_nothing(config, source, crm, review):
+    learn(config.learned_rules_path, 'log', ['example.org'], config.personal_email_domains)
+    outcomes = run(config, source, crm, review, dry_run=True)
+    assert not crm.created and not crm.created_contacts
+    assert {o.message.id: o.decision.new_contacts for o in outcomes}['unknown'] == ('unknown@example.org',)
+
+
+def test_recheck_clears_what_new_rules_decide(config, source, crm, review):
+    # Arrange
+    run(config, source, crm, review)
+    assert set(review.pending()) == {'keyword', 'unknown', 'unknown-with-investor', 'incomplete'}
+    learn(config.learned_rules_path, 'log', ['example.org'], config.personal_email_domains)
+    # Act
+    dry = recheck(config, source, crm, review, dry_run=True)
+    assert len(review.pending()) == 4 and len(crm.created) == 1
+    outcomes = recheck(config, source, crm, review)
+    # Assert
+    assert [o.decision.action for o in dry] == [o.decision.action for o in outcomes]
+    assert set(review.pending()) == {'incomplete'}
+    assert State(config.state_path).data['outcomes']['unknown']['action'] == 'log'
+    assert [c.email for c in crm.created_contacts] == ['unknown@example.org']
+
+
+def test_recheck_skips_what_was_learned_as_skip(config, source, crm, review):
+    run(config, source, crm, review)
+    learn(config.learned_rules_path, 'skip', ['example.org'], config.personal_email_domains)
+    recheck(config, source, crm, review)
+    assert set(review.pending()) == {'incomplete'}
+    assert len(crm.created) == 1 and not crm.created_contacts
+
+
+def test_review_groups(config, source, crm, review):
+    run(config, source, crm, review)
+    groups = review_groups(config, review)
+    assert [(g['key'], sorted(g['ids'])) for g in groups] == [
+        ('example.org', ['incomplete', 'keyword', 'unknown', 'unknown-with-investor'])]
+    assert groups[0]['people'] == {'partner@example.org': 'Partner', 'unknown@example.org': 'Unknown'}
+    assert groups[0]['personal'] is False

@@ -5,6 +5,7 @@ from html.parser import HTMLParser
 from collections.abc import Mapping, Sequence
 
 from .config import Config, EMAIL
+from .learned import LearnedRules, party
 from .models import Contact, Deal, Decision, Message
 
 CALENDAR = re.compile(r"^\s*(accepted|declined|tentative|tentatively accepted|invitation|updated invitation|cancelled event|canceled event):", re.I)
@@ -67,7 +68,8 @@ def visible_html(value: str) -> str:
     return ''.join(parser.parts)
 
 
-def classify(message: Message, config: Config, contacts: Mapping[str, Contact | None], *, approved: bool = False) -> Decision:
+def classify(message: Message, config: Config, contacts: Mapping[str, Contact | None], *, approved: bool = False,
+             learned: LearnedRules = LearnedRules()) -> Decision:
     reason = hard_skip(message, config)
     if reason:
         return Decision("skip", reason)
@@ -79,14 +81,27 @@ def classify(message: Message, config: Config, contacts: Mapping[str, Contact | 
     eligible = eligible_addresses(message, config)
     if not eligible:
         return Decision("skip", "only never-log/internal participants")
-    matched = tuple({c.id: c for addr in eligible if (c := contacts.get(addr))}.values())
-    if not approved:
+    wanted = tuple(a for a in eligible if learned.action_for(a) != "skip")
+    if not wanted:
+        skipped = ", ".join(sorted({party(a, config.personal_email_domains) for a in eligible}))
+        return Decision("skip", f"learned rule: skip {skipped}")
+    remembered = tuple(a for a in wanted if learned.action_for(a) == "log")
+    matched = tuple({c.id: c for addr in wanted if (c := contacts.get(addr))}.values())
+    # A learned "log" is a standing approval, so it covers keyword holds too.
+    if not approved and not remembered:
         content = f"{message.subject}\n{message.text}\n{message.html}\n{visible_html(message.html)}".casefold()
         for keyword in config.review_keywords:
             if re.search(r"(?<!\w)" + re.escape(keyword.casefold()).replace(r"\ ", r"\s+") + r"(?!\w)", content):
                 return Decision("review", f"review keyword: {keyword}")
+    if approved:
+        new = tuple(a for a in wanted if contacts.get(a) is None)
+        return Decision("log", "review approved", matched, new)
+    if remembered:
+        new = tuple(a for a in remembered if contacts.get(a) is None)
+        names = ", ".join(sorted({party(a, config.personal_email_domains) for a in remembered}))
+        return Decision("log", f"learned rule: log {names}", matched, new)
     if matched:
-        return Decision("log", "review approved" if approved else "existing eligible contacts", matched)
+        return Decision("log", "existing eligible contacts", matched)
     if any(blocked(addr, config) for addr in external):
         return Decision("review", "unknown external participants with never-log participant")
     return Decision("review", "no eligible CRM contacts; cannot decide")

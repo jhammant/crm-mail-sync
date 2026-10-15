@@ -21,7 +21,8 @@ def no_network(monkeypatch):
 @pytest.fixture
 def config(tmp_path):
     return replace(load_config('examples/config.example.yaml'), state_path=tmp_path/'state.json',
-                   review_path=tmp_path/'review.jsonl', gmail_token_path=tmp_path/'token.json')
+                   review_path=tmp_path/'review.jsonl', gmail_token_path=tmp_path/'token.json',
+                   learned_rules_path=tmp_path/'learned.yaml')
 
 
 @pytest.fixture

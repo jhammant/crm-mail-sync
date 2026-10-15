@@ -80,6 +80,7 @@ class Decision:
     action: Literal["log", "skip", "review"]
     reason: str
     contacts: tuple[Contact, ...] = ()
+    new_contacts: tuple[str, ...] = ()  # addresses to create in the CRM before logging
 
 
 @dataclass(frozen=True)

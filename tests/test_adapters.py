@@ -290,3 +290,29 @@ def test_gmail_without_visible_recipients_skips_as_bcc(config):
     outcome = evaluate(message, config, crm)
     assert (outcome.decision.action, outcome.decision.reason) == ('skip', "mailbox owner only bcc'd")
     crm.contact.assert_not_called()
+
+
+def test_hubspot_create_contact_links_the_domain_company():
+    # Arrange: no contact yet, one company with the domain, then the create
+    transport = Mock(side_effect=[{'results': []}, {'results': [{'id': '77'}]}, {'id': '501'}])
+    crm = HubSpotCrm('UNUSED', owner_id='9', transport=transport)
+    # Act
+    contact = crm.create_contact('pat@partner.example.org', 'Pat Example', 'partner.example.org')
+    # Assert
+    assert (contact.id, contact.company_id) == ('501', '77')
+    method, path, body = transport.call_args.args
+    assert (method, path) == ('POST', '/crm/v3/objects/contacts')
+    assert body['properties'] == {'email': 'pat@partner.example.org', 'firstname': 'Pat', 'lastname': 'Example',
+                                  'hubspot_owner_id': '9'}
+    assert body['associations'][0]['to'] == {'id': '77'}
+    assert body['associations'][0]['types'][0]['associationTypeId'] == 1
+    assert crm.contact('pat@partner.example.org') == contact
+
+
+def test_hubspot_create_contact_reuses_one_added_since_and_skips_ambiguous_companies():
+    existing = Mock(side_effect=[{'results': [{'id': '42'}]}, {'results': []}])
+    assert HubSpotCrm('UNUSED', transport=existing).create_contact('a@example.com').id == '42'
+    assert not any(c.args[1] == '/crm/v3/objects/contacts' for c in existing.call_args_list)
+    ambiguous = Mock(side_effect=[{'results': []}, {'results': [{'id': '1'}, {'id': '2'}]}, {'id': '9'}])
+    contact = HubSpotCrm('UNUSED', transport=ambiguous).create_contact('a@example.com', '', 'example.com')
+    assert contact.company_id is None and ambiguous.call_args.args[2]['associations'] == []

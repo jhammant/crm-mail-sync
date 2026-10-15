@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 
+from crm_mail_sync.learned import LearnedRules
 from crm_mail_sync.models import Address, Contact
 from crm_mail_sync.rules import classify, domain_matches, recent_open_deals
 
@@ -58,7 +59,8 @@ def test_closed_deals_excluded_and_ordered(crm):
 def test_approval_never_overrides_hard_rules(config, source, crm):
     assert classify(source.get_message('private-message'), config, crm.contacts, approved=True).action == 'skip'
     assert classify(source.get_message('keyword'), config, crm.contacts, approved=True).action == 'log'
-    assert classify(source.get_message('unknown'), config, crm.contacts, approved=True).action == 'review'
+    approved = classify(source.get_message('unknown'), config, crm.contacts, approved=True)
+    assert (approved.action, approved.new_contacts) == ('log', ('unknown@example.org',))
 
 
 def test_keyword_boundaries(config, source, crm):
@@ -122,3 +124,39 @@ def test_visible_owner_alias_or_sent_message_is_not_bcc_only(config, source, crm
     else:
         message = replace(message, labels=('SENT',), to=(Address('guest@example.com'),))
     assert classify(message, config, crm.contacts).reason != "mailbox owner only bcc'd"
+
+
+def test_learned_log_creates_unknown_people_and_covers_keyword_holds(config, source, crm):
+    # Arrange
+    learned = LearnedRules(log=('example.org',))
+    # Act
+    unknown = classify(source.get_message('unknown'), config, crm.contacts, learned=learned)
+    keyword = classify(source.get_message('keyword'), config, crm.contacts, learned=learned)
+    # Assert
+    assert (unknown.action, unknown.reason, unknown.new_contacts) == (
+        'log', 'learned rule: log example.org', ('unknown@example.org',))
+    assert (keyword.action, keyword.new_contacts) == ('log', ())
+    assert [c.id for c in keyword.contacts] == ['partner']
+
+
+def test_learned_log_never_creates_a_never_log_contact(config, source, crm):
+    decision = classify(source.get_message('unknown-with-investor'), config, crm.contacts,
+                        learned=LearnedRules(log=('example.org',)))
+    assert decision.new_contacts == ('unknown@example.org',)
+    assert all(c.email != 'investor@example.org' for c in decision.contacts)
+
+
+def test_learned_skip_wins_even_over_an_existing_contact(config, source, crm):
+    decision = classify(source.get_message('intro'), config, crm.contacts, learned=LearnedRules(skip=('example.org',)))
+    assert (decision.action, decision.reason) == ('skip', 'learned rule: skip example.org')
+
+
+def test_learned_rules_leave_hard_skips_alone(config, source, crm):
+    decision = classify(source.get_message('private-message'), config, crm.contacts, learned=LearnedRules(log=('example.org',)))
+    assert decision.reason == 'private label'
+
+
+def test_personal_address_is_named_in_the_reason(config, source, crm):
+    message = replace(source.get_message('unknown'), to=(Address('operator@example.com'), Address('Someone@gmail.com')))
+    decision = classify(message, config, crm.contacts, learned=LearnedRules(log=('someone@gmail.com',)))
+    assert (decision.reason, decision.new_contacts) == ('learned rule: log someone@gmail.com', ('someone@gmail.com',))

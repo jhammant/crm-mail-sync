@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Roost plugin for crm-mail-sync: the review queue in the menu bar.
 
-With no arguments it prints Roost's menu JSON. Roost calls it back with
-`approve ID`, `skip ID`, `sync` or `dry-run` when you click, and shows the
-first line it prints as a notification.
+With no arguments it prints Roost's menu JSON: the queue grouped by company (or by
+person on a personal address), so one click decides every email with them and
+crm-mail-sync remembers it for future mail. Roost calls it back with `log-group KEY`,
+`skip-group KEY`, `approve ID`, `skip ID`, `sync` or `dry-run` when you click, and
+shows the first line it prints as a notification.
 
 Environment (set in plugin.json):
   CRM_MAIL_SYNC_CONFIG    your private config file
@@ -19,7 +21,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-SHOWN = 15          # review items listed before "and N more"
+SHOWN = 15          # review groups listed before "and N more"
+EMAILS_SHOWN = 10   # emails listed inside one group
 STALE_HOURS = 26    # twice-daily schedule: a day and a bit without a run means it stopped
 
 
@@ -38,7 +41,7 @@ def environment() -> dict:
 def tool(*args: str, live: bool = False) -> subprocess.CompletedProcess:
     command = [os.environ.get('CRM_MAIL_SYNC_BIN', 'crm-mail-sync'), *args,
                '--config', str(Path(os.environ['CRM_MAIL_SYNC_CONFIG']).expanduser())]
-    if live and os.environ.get('CRM_MAIL_SYNC_SOURCE'):
+    if live and os.environ.get('CRM_MAIL_SYNC_SOURCE'):  # demo mode
         command += ['--source', os.environ['CRM_MAIL_SYNC_SOURCE'], '--crm', os.environ.get('CRM_MAIL_SYNC_CRM', 'fake')]
     return subprocess.run(command, capture_output=True, text=True, env=environment(), timeout=600)
 
@@ -86,31 +89,48 @@ def menu() -> dict:
 
     if pending:
         badge = {'text': str(len(pending)), 'level': 'warn'}
-        items.append({'title': f'{len(pending)} email{"s" if len(pending) != 1 else ""} waiting for review'})
+        groups = tool('groups', '--json')
+        groups = json.loads(groups.stdout) if groups.returncode == 0 else []
+        by_id = {item['id']: item for item in pending}
+        items.append({'title': f'{len(pending)} email{"s" if len(pending) != 1 else ""} waiting for review'
+                               f' from {len(groups)} {"company or person" if len(groups) == 1 else "companies and people"}'})
         demo = bool(os.environ.get('CRM_MAIL_SYNC_SOURCE'))
-        for item in pending[:SHOWN]:
-            sender = item['from']
-            who = f"{sender['name']} <{sender['email']}>" if sender.get('name') else sender['email']
-            subject = short(item['subject'], 60)
-            actions = [{'title': f"From {short(who, 70)} · {item['timestamp'][:16].replace('T', ' ')}"},
-                       {'title': f"Why: {item['reason']}"}]
-            if not demo:
-                actions.append({'title': 'Open in Gmail',
+        for group in groups[:SHOWN]:
+            count = len(group['ids'])
+            label = f"{group['key']} · {count} email{'s' if count != 1 else ''}"
+            actions = [{'title': short(', '.join(f'{n} <{e}>' if n else e for e, n in group['people'].items()), 90)}] \
+                if group['people'] else []
+            actions.append({'title': 'Why: ' + short('; '.join(f'{n} {r}' for r, n in group['reasons'].items()), 90)})
+            if group['people']:
+                who = 'this person' if group['personal'] else group['key']
+                actions.append({'title': 'Log all and remember…', 'run': [me(), 'log-group', group['key']],
+                                'confirm': f'Log these {count} emails to HubSpot, adding anyone who isn\'t there yet, '
+                                           f'and log future mail with {who} automatically?'})
+                actions.append({'title': 'Skip all and remember', 'run': [me(), 'skip-group', group['key']]})
+            emails = []
+            for message_id in group['ids'][:EMAILS_SHOWN]:
+                item = by_id.get(message_id)
+                if not item:
+                    continue
+                subject = short(item['subject'], 60)
+                one = [{'title': f"Why: {item['reason']}"}]
+                if not demo:
+                    one.append({'title': 'Open in Gmail',
                                 'open': f"https://mail.google.com/mail/?authuser={report['mailbox']}#all/{item['thread_id']}"})
-            approve = {'run': [me(), 'approve', item['id']],
-                       'confirm': f'Log "{subject}" to HubSpot? Privacy rules are checked again first.'}
-            if item['reason'].startswith('review keyword'):
-                actions.append({'title': 'Log to HubSpot…', **approve})
-            elif 'incomplete' in item['reason']:
-                # Approval re-checks the message, and an unreadable one never passes.
-                actions.append({'title': "Can't be logged automatically: log it by hand if it matters"})
-            else:
-                # Approval never creates contacts, so the people have to exist in HubSpot first.
-                actions.append({'title': 'Log to HubSpot… (add them to HubSpot first)', **approve})
-            actions.append({'title': 'Skip (never log it)', 'run': [me(), 'skip', item['id']]})
-            items.append({'title': subject, 'items': actions})
-        if len(pending) > SHOWN:
-            items.append({'title': f'…and {len(pending) - SHOWN} more: crm-mail-sync review'})
+                if 'incomplete' in item['reason']:
+                    # Approval re-checks the message, and an unreadable one never passes.
+                    one.append({'title': "Can't be logged automatically: log it by hand if it matters"})
+                else:
+                    one.append({'title': 'Log just this one…', 'run': [me(), 'approve', message_id],
+                                'confirm': f'Log "{subject}" to HubSpot, adding anyone who isn\'t there yet?'})
+                one.append({'title': 'Skip just this one', 'run': [me(), 'skip', message_id]})
+                emails.append({'title': subject, 'items': one})
+            if count > EMAILS_SHOWN:
+                emails.append({'title': f'…and {count - EMAILS_SHOWN} more'})
+            actions.append({'title': 'One by one', 'items': emails})
+            items.append({'title': label, 'items': actions})
+        if len(groups) > SHOWN:
+            items.append({'title': f'…and {len(groups) - SHOWN} more: crm-mail-sync groups'})
     else:
         items.append({'title': 'Review queue empty'})
 
@@ -123,12 +143,19 @@ def menu() -> dict:
 
 
 def act(action: str, args: list[str]) -> int:
-    if action in {'approve', 'skip'} and len(args) == 1:
+    if action in {'log-group', 'skip-group'} and len(args) == 1:
+        learned = tool('learn', action.removesuffix('-group'), args[0])
+        if learned.returncode != 0:
+            print((learned.stderr.strip() or f'crm-mail-sync exited {learned.returncode}').splitlines()[0])
+            return learned.returncode
+        result = tool('recheck', live=True)
+    elif action in {'approve', 'skip'} and len(args) == 1:
         result = tool(action, args[0], live=action == 'approve')
     elif action in {'sync', 'dry-run'} and not args:
         result = tool('run', *(['--dry-run'] if action == 'dry-run' else []), live=True)
     else:
-        print(f'usage: {sys.argv[0]} [approve ID | skip ID | sync | dry-run]', file=sys.stderr)
+        print(f'usage: {sys.argv[0]} [log-group KEY | skip-group KEY | approve ID | skip ID | sync | dry-run]',
+              file=sys.stderr)
         return 2
     lines = (result.stdout.strip() or result.stderr.strip()).splitlines()
     # run prints one line per message and its summary last; approve and skip print one line.

@@ -12,7 +12,8 @@ from crm_mail_sync.config import load_config
 
 def configured(tmp_path):
     data = yaml.safe_load(Path('examples/config.example.yaml').read_text())
-    data.update(state_path='state.json', review_path='review.jsonl', gmail_token_path='token.json')
+    data.update(state_path='state.json', review_path='review.jsonl', gmail_token_path='token.json',
+                learned_rules_path='learned.yaml')
     path = tmp_path/'config.yaml'
     path.write_text(yaml.safe_dump(data))
     return path
@@ -120,3 +121,49 @@ def test_automated_sender_config_rejects_invalid_values(tmp_path):
         path.write_text(yaml.safe_dump(dict(original, **{key: value})))
         with pytest.raises(ValueError, match=key):
             load_config(path)
+
+
+def test_cli_learned_rules_end_to_end(tmp_path):
+    # Arrange
+    config = configured(tmp_path)
+    fixture = ['--source', 'fixtures/sample-mailbox.json', '--crm', 'fake']
+    def cli(*args):
+        return subprocess.run([sys.executable, '-m', 'crm_mail_sync.cli', *args, '--config', str(config)],
+                              text=True, capture_output=True, check=True).stdout
+    cli('run', *fixture)
+    # Act and assert: one group, then a remembered skip, then a learned log that recheck applies
+    assert 'example.org: 4 email(s)' in cli('groups')
+    assert json.loads(cli('groups', '--json'))[0]['key'] == 'example.org'
+    assert 'learned log: example.org' in cli('learn', 'log', 'example.org', '--note', 'test')
+    assert 'nothing new' in cli('learn', 'log', 'example.org')
+    assert 'recheck dry-run: 4 pending; log=3 skip=0 still review=1' in cli('recheck', '--dry-run', *fixture)
+    assert '4 pending review item(s)' in cli('review')
+    assert 'recheck: 4 pending; log=3 skip=0 still review=1' in cli('recheck', *fixture)
+    assert '1 pending review item(s)' in cli('review')
+    assert 'remembered skip: example.org' in cli('skip', 'incomplete', '--remember')
+    learned = yaml.safe_load((tmp_path / 'learned.yaml').read_text())
+    assert [r['match'] for r in learned['skip']] == ['example.org'] and learned['log'] == []
+    assert (tmp_path / 'learned.yaml').stat().st_mode & 0o777 == 0o600
+
+
+def test_cli_refuses_a_personal_domain_rule(tmp_path, capsys):
+    config = configured(tmp_path)
+    assert main(['learn', 'log', 'gmail.com', '--config', str(config)]) == 1
+    assert 'personal email domain' in capsys.readouterr().err
+
+
+def test_every_run_rechecks_the_queue(tmp_path):
+    # Arrange
+    config = configured(tmp_path)
+    fixture = ['--source', 'fixtures/sample-mailbox.json', '--crm', 'fake']
+    def cli(*args):
+        return subprocess.run([sys.executable, '-m', 'crm_mail_sync.cli', *args, '--config', str(config)],
+                              text=True, capture_output=True, check=True).stdout
+    assert 'review=4; queue: 0 decided, 0 waiting' in cli('run', *fixture)
+    cli('learn', 'log', 'example.org')
+    # Act
+    second = cli('run', *fixture)
+    # Assert
+    assert 'run: 0 message(s); log=0 skip=0 review=0; queue: 3 decided, 1 waiting' in second
+    assert len([line for line in second.splitlines() if line.startswith('queue ')]) == 3
+    assert '1 pending review item(s)' in cli('review')

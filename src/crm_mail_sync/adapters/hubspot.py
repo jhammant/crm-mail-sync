@@ -13,6 +13,7 @@ EMAIL_TO_CONTACT = 198
 EMAIL_TO_COMPANY = 186
 # Confirm this HUBSPOT_DEFINED type against the live associations API before first real use.
 EMAIL_TO_DEAL = 210
+CONTACT_TO_COMPANY_PRIMARY = 1
 
 # CRM search allows about five requests a second per token, shared with anything else
 # using it. Pace every request, and retry rate limits and gateway errors on reads only.
@@ -156,3 +157,32 @@ class HubSpotCrm:
         result = self.request('POST', '/crm/v3/objects/emails',
                               email_payload(message, associations, direction, self.owner_id))
         return str(result['id'])
+
+    def company_for_domain(self, domain: str) -> str | None:
+        """The one company whose domain is exactly this; None when there is none or several."""
+        result = self.request('POST', '/crm/v3/objects/companies/search', {
+            'filterGroups': [{'filters': [{'propertyName': 'domain', 'operator': 'EQ', 'value': domain}]}],
+            'properties': ['domain'], 'limit': 2})
+        rows = result.get('results', [])
+        return str(rows[0]['id']) if len(rows) == 1 else None
+
+    def create_contact(self, email: str, name: str = '', company_domain: str | None = None) -> Contact:
+        self._contacts.pop(email, None)  # look again: someone may have added them since the run read HubSpot
+        existing = self.contact(email)
+        if existing:
+            return existing
+        company = self.company_for_domain(company_domain) if company_domain else None
+        first, _, last = name.strip().partition(' ')
+        properties = {'email': email}
+        if first:
+            properties['firstname'] = first
+        if last:
+            properties['lastname'] = last
+        if self.owner_id:
+            properties['hubspot_owner_id'] = self.owner_id
+        links = [{'to': {'id': company}, 'types': [
+            {'associationCategory': 'HUBSPOT_DEFINED', 'associationTypeId': CONTACT_TO_COMPANY_PRIMARY}]}] if company else []
+        result = self.request('POST', '/crm/v3/objects/contacts', {'properties': properties, 'associations': links})
+        contact = Contact(str(result['id']), email, company)
+        self._contacts[email] = contact
+        return contact

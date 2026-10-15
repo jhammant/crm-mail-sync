@@ -13,12 +13,15 @@ def private_directory(path: Path) -> None:
 
 
 def atomic_json(path: Path, data: dict) -> None:
+    atomic_text(path, json.dumps(data, indent=2) + '\n')
+
+
+def atomic_text(path: Path, text: str) -> None:
     private_directory(path.parent)
     fd, temporary = tempfile.mkstemp(prefix=path.name + '.', dir=path.parent)
     try:
         with os.fdopen(fd, 'w') as stream:
-            json.dump(data, stream, indent=2)
-            stream.write('\n')
+            stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)

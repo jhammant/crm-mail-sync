@@ -15,6 +15,13 @@ DEFAULT_AUTOMATED_SENDER_PATTERNS = (
     "*docusign*@*", "*echosign*@*", "*@*docusign*", "*@*echosign*",
 )
 
+# Decisions about people on these domains are remembered per address, never for the whole domain.
+DEFAULT_PERSONAL_EMAIL_DOMAINS = (
+    "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "hotmail.co.uk", "live.com", "live.co.uk",
+    "msn.com", "yahoo.com", "yahoo.co.uk", "icloud.com", "me.com", "mac.com", "aol.com", "proton.me",
+    "protonmail.com", "btinternet.com", "sky.com",
+)
+
 
 @dataclass(frozen=True)
 class Config:
@@ -31,6 +38,8 @@ class Config:
     initial_since: str = ""
     skip_automated_senders: bool = True
     automated_sender_patterns: tuple[str, ...] = DEFAULT_AUTOMATED_SENDER_PATTERNS
+    learned_rules_path: Path | None = None
+    personal_email_domains: tuple[str, ...] = DEFAULT_PERSONAL_EMAIL_DOMAINS
 
 
 def load_config(path: str | Path) -> Config:
@@ -42,9 +51,12 @@ def load_config(path: str | Path) -> Config:
     if unknown:
         raise ValueError(f"Unknown config keys: {', '.join(sorted(unknown))}")
     data.setdefault("automated_sender_patterns", list(DEFAULT_AUTOMATED_SENDER_PATTERNS))
+    data.setdefault("personal_email_domains", list(DEFAULT_PERSONAL_EMAIL_DOMAINS))
+    data.setdefault("learned_rules_path", "learned.yaml")
     if not isinstance(data.get("skip_automated_senders", True), bool):
         raise ValueError("skip_automated_senders must be a boolean")
-    for key in ("automated_sender_patterns", "mailbox_addresses", "internal_domains", "never_log", "review_keywords"):
+    for key in ("automated_sender_patterns", "mailbox_addresses", "internal_domains", "never_log", "review_keywords",
+                "personal_email_domains"):
         value = data.get(key)
         if not isinstance(value, list) or any(not isinstance(x, str) or not x.strip() for x in value):
             raise ValueError(f"{key} must be a list of non-empty strings")
@@ -54,18 +66,21 @@ def load_config(path: str | Path) -> Config:
             raise ValueError(f"{key} must contain valid {'addresses' if key == 'mailbox_addresses' else 'domains'}")
     if any(not (EMAIL.fullmatch(x) or DOMAIN.fullmatch(x)) for x in data["never_log"]):
         raise ValueError("never_log entries must be email addresses or domains")
+    if any(not DOMAIN.fullmatch(x) for x in data["personal_email_domains"]):
+        raise ValueError("personal_email_domains must contain valid domains")
     for key in ("private_label", "initial_since"):
         if not isinstance(data.get(key), str) or not data[key].strip():
             raise ValueError(f"{key} must be a non-empty string")
     from datetime import date
     date.fromisoformat(data["initial_since"])
-    for key in ("state_path", "review_path", "gmail_token_path"):
+    paths = ("state_path", "review_path", "gmail_token_path", "learned_rules_path")
+    for key in paths:
         if not isinstance(data.get(key), str) or not data[key].strip():
             raise ValueError(f"{key} must be a path")
         candidate = Path(data[key]).expanduser()
         data[key] = (path.parent / candidate).resolve()
-    if len({data[k] for k in ("state_path", "review_path", "gmail_token_path")}) != 3:
-        raise ValueError("State, review and token paths must be distinct")
+    if len({data[k] for k in paths}) != len(paths):
+        raise ValueError("State, review, token and learned rules paths must be distinct")
     token_env = data.get("hubspot_token_env", "HUBSPOT_TOKEN")
     if not isinstance(token_env, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token_env):
         raise ValueError("hubspot_token_env must be an environment variable name")
