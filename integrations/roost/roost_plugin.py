@@ -3,9 +3,11 @@
 
 With no arguments it prints Roost's menu JSON: the queue grouped by company (or by
 person on a personal address), so one click decides every email with them and
-crm-mail-sync remembers it for future mail. Roost calls it back with `log-group KEY`,
-`skip-group KEY`, `approve ID`, `skip ID`, `sync` or `dry-run` when you click, and
-shows the first line it prints as a notification.
+crm-mail-sync remembers it for future mail. Inside a company, each person can be flagged
+on their own, and `Flag someone to sync…` takes any address or domain. Roost calls it
+back with `log-group KEY`, `skip-group KEY`, `log-person ADDRESS`, `skip-person ADDRESS`,
+`flag [ADDRESS_OR_DOMAIN]`, `approve ID`, `skip ID`, `sync` or `dry-run` when you click,
+and shows the first line it prints as a notification.
 
 Environment (set in plugin.json):
   CRM_MAIL_SYNC_CONFIG    your private config file
@@ -98,8 +100,11 @@ def menu() -> dict:
         for group in groups[:SHOWN]:
             count = len(group['ids'])
             label = f"{group['key']} · {count} email{'s' if count != 1 else ''}"
-            actions = [{'title': short(', '.join(f'{n} <{e}>' if n else e for e, n in group['people'].items()), 90)}] \
-                if group['people'] else []
+            if group['personal'] or len(group['people']) < 2:
+                actions = [{'title': short(', '.join(f'{n} <{e}>' if n else e for e, n in group['people'].items()), 90)}] \
+                    if group['people'] else []
+            else:  # a company: each person can be flagged on their own, whatever the rest of it gets
+                actions = [{'title': f'{len(group["people"])} people', 'items': [person_node(e, n) for e, n in group['people'].items()]}]
             actions.append({'title': 'Why: ' + short('; '.join(f'{n} {r}' for r, n in group['reasons'].items()), 90)})
             if group['people']:
                 who = 'this person' if group['personal'] else group['key']
@@ -135,6 +140,9 @@ def menu() -> dict:
         items.append({'title': 'Review queue empty'})
 
     items += [
+        {'title': 'Flag someone to sync…', 'run': [me(), 'flag'],
+         'tooltip': 'An address or a company domain: their email is logged to HubSpot from now on, '
+                    'even if they have never been in the review queue'},
         {'title': 'Dry-run now (writes nothing)', 'run': [me(), 'dry-run']},
         {'title': 'Sync now…', 'run': [me(), 'sync'], 'confirm': 'Log matching emails to HubSpot now?'},
         {'title': 'Open config folder', 'open': str(config.parent)},
@@ -142,9 +150,33 @@ def menu() -> dict:
     return {'title': 'CRM mail sync', 'badge': badge, 'items': items}
 
 
+def person_node(email: str, name: str) -> dict:
+    who = f'{name} <{email}>' if name else email
+    return {'title': short(who, 70), 'items': [
+        {'title': 'Sync this person…', 'run': [me(), 'log-person', email],
+         'confirm': f'Log email with {who} to HubSpot from now on, adding them if they aren\'t there yet?'},
+        {'title': 'Skip this person from now on', 'run': [me(), 'skip-person', email],
+         'tooltip': "Stops asking about them. If they're already in HubSpot their email still logs (never_log in the config stops that)"},
+    ]}
+
+
+def ask_who() -> str | None:
+    """A dialog for the address or domain to flag, since Roost's menu has no text field. None when cancelled."""
+    script = ('text returned of (display dialog "Flag someone to sync to HubSpot: their email address, '
+              'or a company domain for everyone there" default answer "" with title "CRM mail sync")')
+    answer = subprocess.run(['osascript', '-e', script], capture_output=True, text=True)
+    return answer.stdout.strip() or None if answer.returncode == 0 else None
+
+
 def act(action: str, args: list[str]) -> int:
-    if action in {'log-group', 'skip-group'} and len(args) == 1:
-        learned = tool('learn', action.removesuffix('-group'), args[0])
+    if action == 'flag' and len(args) <= 1:
+        who = args[0] if args else ask_who()
+        if not who:
+            print('Nothing flagged')
+            return 0
+        action, args = 'log-person', [who]
+    if action in {'log-group', 'skip-group', 'log-person', 'skip-person'} and len(args) == 1:
+        learned = tool('learn', action.partition('-')[0], args[0])
         if learned.returncode != 0:
             print((learned.stderr.strip() or f'crm-mail-sync exited {learned.returncode}').splitlines()[0])
             return learned.returncode
@@ -154,7 +186,8 @@ def act(action: str, args: list[str]) -> int:
     elif action in {'sync', 'dry-run'} and not args:
         result = tool('run', *(['--dry-run'] if action == 'dry-run' else []), live=True)
     else:
-        print(f'usage: {sys.argv[0]} [log-group KEY | skip-group KEY | approve ID | skip ID | sync | dry-run]',
+        print(f'usage: {sys.argv[0]} [log-group KEY | skip-group KEY | log-person ADDRESS | skip-person ADDRESS | '
+              f'flag [ADDRESS_OR_DOMAIN] | approve ID | skip ID | sync | dry-run]',
               file=sys.stderr)
         return 2
     lines = (result.stdout.strip() or result.stderr.strip()).splitlines()

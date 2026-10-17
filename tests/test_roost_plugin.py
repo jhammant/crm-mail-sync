@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 import pytest
+import yaml
 
 from crm_mail_sync.cli import main
 
@@ -70,3 +71,46 @@ def test_queue_badges_and_actions_resolve_items(plugin_env):
     refused = plugin(plugin_env, 'log-group', 'gmail.com')
     assert refused.returncode == 1 and 'personal email domain' in refused.stdout
     assert plugin(plugin_env, 'dry-run').stdout.strip() == 'dry-run: 0 message(s); log=0 skip=0 review=0; queue: 0 decided, 1 waiting'
+
+
+def test_each_person_in_a_company_can_be_flagged_on_their_own(plugin_env):
+    # Arrange
+    assert main(['run', '--config', plugin_env['CRM_MAIL_SYNC_CONFIG'], '--source', str(FIXTURE), '--crm', 'fake']) == 0
+    menu = json.loads(plugin(plugin_env).stdout)
+    group = next(item for item in menu['items'] if item['title'] == 'example.org · 4 emails')
+    people = next(a for a in group['items'] if a['title'] == '2 people')
+    partner = next(p for p in people['items'] if p['title'] == 'Partner <partner@example.org>')
+    actions = {a['title']: a for a in partner['items']}
+    learned = Path(plugin_env['CRM_MAIL_SYNC_CONFIG']).parent / 'learned.yaml'
+
+    # Act
+    synced = plugin(plugin_env, *actions['Sync this person…']['run'][1:])
+    skipped = plugin(plugin_env, 'skip-person', 'unknown@example.org')
+
+    # Assert
+    assert actions['Sync this person…']['run'][-2:] == ['log-person', 'partner@example.org']
+    assert 'Log email with Partner <partner@example.org>' in actions['Sync this person…']['confirm']
+    assert actions['Skip this person from now on']['run'][-2:] == ['skip-person', 'partner@example.org']
+    assert synced.returncode == 0 and synced.stdout.startswith('recheck:')
+    assert skipped.returncode == 0 and skipped.stdout.startswith('recheck:')
+    rules = {action: [row['match'] for row in rows] for action, rows in yaml.safe_load(learned.read_text()).items()}
+    assert rules == {'log': ['partner@example.org'], 'skip': ['unknown@example.org']}, \
+        'each person is remembered on their own, and the rest of the company is left alone'
+
+
+def test_flag_someone_who_was_never_in_the_queue(plugin_env):
+    # Arrange
+    menu = json.loads(plugin(plugin_env).stdout)
+    flag = next(item for item in menu['items'] if item['title'] == 'Flag someone to sync…')
+    learned = Path(plugin_env['CRM_MAIL_SYNC_CONFIG']).parent / 'learned.yaml'
+
+    # Act
+    person = plugin(plugin_env, 'flag', 'New.Contact@Acme.test')
+    company = plugin(plugin_env, 'flag', 'globex.test')
+    refused = plugin(plugin_env, 'flag', 'not an address')
+
+    # Assert
+    assert flag['run'][-1] == 'flag'
+    assert person.returncode == 0 and company.returncode == 0
+    assert 'match: new.contact@acme.test' in learned.read_text() and 'match: globex.test' in learned.read_text()
+    assert refused.returncode == 1 and 'Not an address or a domain' in refused.stdout

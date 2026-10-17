@@ -197,7 +197,7 @@ An address beats a domain, and for the same entry `skip` beats `log`. `crm-mail-
 
 ### 5. Optional: the review queue in your menu bar
 
-[Roost](https://github.com/jhammant/roost) can show the queue in the macOS menu bar: a badge with the number of emails waiting, one row per company or person with *Log all and remember…* (with a confirmation) and *Skip all and remember*, and the emails one by one underneath with *Open in Gmail*, *Log just this one…* and *Skip just this one*. The plugin ships in [`integrations/roost/`](integrations/roost/):
+[Roost](https://github.com/jhammant/roost) can show the queue in the macOS menu bar: a badge with the number of emails waiting, one row per company or person with *Log all and remember…* (with a confirmation) and *Skip all and remember*, and the emails one by one underneath with *Open in Gmail*, *Log just this one…* and *Skip just this one*. Inside a company each person has *Sync this person…* and *Skip this person from now on*, remembered for that address alone, and *Flag someone to sync…* takes any address or domain, even someone who has never been in the queue. The plugin ships in [`integrations/roost/`](integrations/roost/):
 
 ```bash
 ln -s "$PWD/.venv/bin/crm-mail-sync" ~/.local/bin/crm-mail-sync   # Roost needs it on the PATH
